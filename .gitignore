@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+/app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+
+# SDK path specifico della macchina (NON committare)
+local.properties
+
+# OS
+.DS_Store
+
+# Output
+*.apk
+*.aab
+
+# NB: keystore/debug.keystore E' committata di proposito (firma stabile).

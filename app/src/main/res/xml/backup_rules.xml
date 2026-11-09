@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Non includere i segreti (API Key / token) nel backup. -->
+    <exclude domain="sharedpref" path="homebox_secure_prefs.xml" />
+</full-backup-content>
