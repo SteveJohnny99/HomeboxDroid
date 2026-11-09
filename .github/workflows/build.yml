@@ -23,6 +23,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Il pacchetto legacy "tools" (default dell'action) non esiste piu'
+          # nel repo SDK e faceva fallire lo step. platform/build-tools sono
+          # gia' presenti sul runner (o scaricati da AGP).
+          packages: 'platform-tools'
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
@@ -62,6 +67,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Il pacchetto legacy "tools" (default dell'action) non esiste piu'
+          # nel repo SDK e faceva fallire lo step. platform/build-tools sono
+          # gia' presenti sul runner (o scaricati da AGP).
+          packages: 'platform-tools'
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
