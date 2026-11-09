@@ -10,8 +10,12 @@ import it.stevej.homeboxdroid.domain.EntityNode
 import it.stevej.homeboxdroid.domain.LocationRef
 import it.stevej.homeboxdroid.domain.NodeType
 import it.stevej.homeboxdroid.domain.Statistics
+import it.stevej.homeboxdroid.domain.Tag
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -63,6 +67,14 @@ class HomeViewModel @Inject constructor(
     private val _detail = MutableStateFlow<DetailState>(DetailState.Hidden)
     val detail: StateFlow<DetailState> = _detail.asStateFlow()
 
+    private val _tags = MutableStateFlow<List<Tag>>(emptyList())
+    val tags: StateFlow<List<Tag>> = _tags.asStateFlow()
+
+    // Emesso quando una creazione/modifica/eliminazione va a buon fine: le UI
+    // (dialog) lo usano per chiudersi SOLO in caso di successo.
+    private val _saveSuccess = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val saveSuccess: SharedFlow<Unit> = _saveSuccess.asSharedFlow()
+
     val locations: List<LocationRef>
         get() = HomeboxRepository.flattenLocations(_state.value.tree)
 
@@ -82,6 +94,7 @@ class HomeViewModel @Inject constructor(
                 }
             }
             loadStats()
+            loadTags()
         }
     }
 
@@ -90,6 +103,28 @@ class HomeViewModel @Inject constructor(
             when (val r = repo.statistics()) {
                 is ApiResult.Success -> _state.update { it.copy(stats = r.data) }
                 is ApiResult.Error -> Unit // la dashboard mostra "-" in caso di errore
+            }
+        }
+    }
+
+    private fun loadTags() {
+        viewModelScope.launch {
+            when (val r = repo.tags()) {
+                is ApiResult.Success -> _tags.value = r.data
+                is ApiResult.Error -> Unit
+            }
+        }
+    }
+
+    fun createTag(name: String, onCreated: (Tag) -> Unit) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            when (val r = repo.createTag(name)) {
+                is ApiResult.Error -> _state.update { it.copy(message = r.message) }
+                is ApiResult.Success -> {
+                    _tags.value = (_tags.value + r.data).distinctBy { it.id }
+                    onCreated(r.data)
+                }
             }
         }
     }
@@ -127,6 +162,7 @@ class HomeViewModel @Inject constructor(
                 is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
                 is ApiResult.Success -> {
                     _state.update { it.copy(saving = false, message = "Luogo creato.") }
+                    _saveSuccess.tryEmit(Unit)
                     refresh()
                 }
             }
@@ -140,14 +176,16 @@ class HomeViewModel @Inject constructor(
         manufacturer: String?,
         modelNumber: String?,
         locationId: String?,
+        tagIds: List<String> = emptyList(),
     ) {
         if (name.isBlank()) return
         _state.update { it.copy(saving = true) }
         viewModelScope.launch {
-            when (val r = repo.createItem(name, quantity, description, manufacturer, modelNumber, locationId)) {
+            when (val r = repo.createItem(name, quantity, description, manufacturer, modelNumber, locationId, tagIds)) {
                 is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
                 is ApiResult.Success -> {
                     _state.update { it.copy(saving = false, message = "Oggetto creato.") }
+                    _saveSuccess.tryEmit(Unit)
                     refresh()
                 }
             }
@@ -162,6 +200,7 @@ class HomeViewModel @Inject constructor(
                 is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
                 is ApiResult.Success -> {
                     _state.update { it.copy(saving = false, message = "Modifiche salvate.") }
+                    _saveSuccess.tryEmit(Unit)
                     closeDetail()
                     refresh()
                 }

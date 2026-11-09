@@ -6,6 +6,7 @@ import it.stevej.homeboxdroid.data.remote.EntityTypeSummaryDto
 import it.stevej.homeboxdroid.data.remote.EntityUpdateDto
 import it.stevej.homeboxdroid.data.remote.HomeboxApi
 import it.stevej.homeboxdroid.data.remote.LoginFormDto
+import it.stevej.homeboxdroid.data.remote.TagCreateDto
 import it.stevej.homeboxdroid.data.remote.TreeItemDto
 import it.stevej.homeboxdroid.domain.EntityDetail
 import it.stevej.homeboxdroid.domain.EntityNode
@@ -13,6 +14,7 @@ import it.stevej.homeboxdroid.domain.EntityType
 import it.stevej.homeboxdroid.domain.LocationRef
 import it.stevej.homeboxdroid.domain.NodeType
 import it.stevej.homeboxdroid.domain.Statistics
+import it.stevej.homeboxdroid.domain.Tag
 import it.stevej.homeboxdroid.domain.UserInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -162,6 +164,29 @@ class HomeboxRepository @Inject constructor(
         }
     }
 
+    // --- Tag ----------------------------------------------------------------
+
+    suspend fun tags(): ApiResult<List<Tag>> = withContext(Dispatchers.IO) {
+        when (val r = safeApiCall { api.tags() }) {
+            is ApiResult.Error -> ApiResult.Error(r.message, r.code)
+            is ApiResult.Success -> ApiResult.Success(
+                r.data.mapNotNull { t ->
+                    val id = t.id ?: return@mapNotNull null
+                    Tag(id = id, name = t.name ?: "(tag)", color = t.color)
+                }
+            )
+        }
+    }
+
+    suspend fun createTag(name: String): ApiResult<Tag> = withContext(Dispatchers.IO) {
+        when (val r = safeApiCall { api.createTag(TagCreateDto(name = name.trim())) }) {
+            is ApiResult.Error -> ApiResult.Error(r.message, r.code)
+            is ApiResult.Success -> ApiResult.Success(
+                Tag(id = r.data.id ?: "", name = r.data.name ?: name.trim(), color = r.data.color)
+            )
+        }
+    }
+
     // --- Tipi entita' -------------------------------------------------------
 
     suspend fun entityTypes(force: Boolean = false): ApiResult<List<EntityType>> =
@@ -220,6 +245,7 @@ class HomeboxRepository @Inject constructor(
         manufacturer: String?,
         modelNumber: String?,
         locationId: String?,
+        tagIds: List<String> = emptyList(),
     ): ApiResult<String> = withContext(Dispatchers.IO) {
         val typeId = when (val r = resolveTypeId(location = false)) {
             is ApiResult.Error -> return@withContext ApiResult.Error(r.message, r.code)
@@ -234,6 +260,7 @@ class HomeboxRepository @Inject constructor(
             modelNumber = modelNumber?.trim()?.ifBlank { null },
             locationId = locationId,
             parentId = locationId, // compare sotto la location nell'albero
+            tagIds = tagIds.ifEmpty { null },
         )
         when (val r = safeApiCall { api.createEntity(body) }) {
             is ApiResult.Error -> ApiResult.Error(r.message, r.code)
@@ -259,6 +286,7 @@ class HomeboxRepository @Inject constructor(
         val lifetimeWarranty: Boolean,
         val locationId: String?,
         val parentId: String?,
+        val tagIds: List<String>,
     )
 
     suspend fun updateEntity(id: String, edit: EntityEdit): ApiResult<Unit> =
@@ -296,7 +324,7 @@ class HomeboxRepository @Inject constructor(
                 soldPrice = current.soldPrice,
                 soldTo = current.soldTo,
                 soldNotes = current.soldNotes,
-                tagIds = current.tags?.mapNotNull { it.id },
+                tagIds = edit.tagIds,
                 fields = current.fields,
             )
             when (val r = safeApiCall { api.updateEntity(id, body) }) {
@@ -352,6 +380,7 @@ class HomeboxRepository @Inject constructor(
         typeName = entityType?.name,
         isLocation = entityType?.isLocation ?: false,
         tags = tags?.mapNotNull { it.name } ?: emptyList(),
+        tagIds = tags?.mapNotNull { it.id } ?: emptyList(),
         childrenCount = children?.size ?: 0,
         locationId = locationId ?: location?.id,
         parentId = parent?.id,

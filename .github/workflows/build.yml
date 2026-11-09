@@ -39,15 +39,13 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Prepare APK (nome con versione)
+      - name: Prepare APK
         run: |
           mkdir -p dist
           VERSION=$(grep -E 'versionName' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          cp app/build/outputs/apk/debug/app-debug.apk \
-            "dist/HomeboxDroid-v${VERSION}-debug.apk"
-          cp app/build/outputs/apk/debug/app-debug.apk \
-            "dist/HomeboxDroid-debug-${GITHUB_SHA::7}.apk"
+          # Nome STABILE per la release (sempre l'ultimo, nessun accumulo).
+          cp app/build/outputs/apk/debug/app-debug.apk dist/HomeboxDroid-debug.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -58,16 +56,18 @@ jobs:
 
       # Su push di main pubblica/aggiorna una Release "rolling" con l'APK, usando
       # il token di Actions (indipendente dai permessi di push dell'utente).
+      # L'asset ha nome stabile: ogni build sostituisce il precedente.
       - name: Publish/update rolling Release
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-latest
-          name: HomeboxDroid - ultima build (main)
+          name: HomeboxDroid v${{ env.VERSION }} (ultima build)
           body: |
-            APK di test compilato automaticamente dall'ultimo commit su main.
+            APK di test (debug) compilato dall'ultimo commit su main.
+            Versione: v${{ env.VERSION }}
             Commit: ${{ github.sha }}
-          files: dist/HomeboxDroid-v*-debug.apk
+          files: dist/HomeboxDroid-debug.apk
           fail_on_unmatched_files: true
           make_latest: true
 

@@ -34,6 +34,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
@@ -167,13 +168,13 @@ private fun DetailBody(e: EntityDetail) {
         DetailField("Numero seriale", e.serialNumber)
         DetailField("Asset ID", e.assetId)
         DetailField("Prezzo d'acquisto", e.purchasePrice?.let { "%.2f".format(it) })
-        DetailField("Data acquisto", e.purchaseDate)
+        DetailField("Data acquisto", e.purchaseDate?.let { formatIsoToDisplay(it) })
         DetailField("Acquistato da", e.purchaseFrom)
         DetailField(
             "Garanzia",
             when {
                 e.lifetimeWarranty -> "A vita"
-                e.warrantyExpires != null -> "Scade il ${e.warrantyExpires}"
+                e.warrantyExpires != null -> "Scade il ${formatIsoToDisplay(e.warrantyExpires)}"
                 else -> null
             },
         )
@@ -247,6 +248,7 @@ fun CreateDialogs(viewModel: HomeViewModel, show: Boolean, onDismiss: () -> Unit
 @Composable
 private fun CreateLocationDialog(viewModel: HomeViewModel, onClose: () -> Unit) {
     val state by viewModel.state.collectAsState()
+    LaunchedEffect(Unit) { viewModel.saveSuccess.collect { onClose() } }
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     val parentName = state.crumbs.lastOrNull()?.takeIf { it.id.isNotBlank() }?.name
@@ -279,7 +281,7 @@ private fun CreateLocationDialog(viewModel: HomeViewModel, onClose: () -> Unit) 
         },
         confirmButton = {
             TextButton(
-                onClick = { viewModel.createLocation(name, description); onClose() },
+                onClick = { viewModel.createLocation(name, description) },
                 enabled = name.isNotBlank() && !state.saving,
             ) { Text("Crea") }
         },
@@ -294,6 +296,9 @@ private fun CreateLocationDialog(viewModel: HomeViewModel, onClose: () -> Unit) 
 private fun CreateItemDialog(viewModel: HomeViewModel, onClose: () -> Unit) {
     val state by viewModel.state.collectAsState()
     val locations = remember { viewModel.locations }
+    val tags by viewModel.tags.collectAsState()
+    var selectedTags by remember { mutableStateOf(emptySet<String>()) }
+    LaunchedEffect(Unit) { viewModel.saveSuccess.collect { onClose() } }
 
     var name by remember { mutableStateOf("") }
     var quantity by remember { mutableStateOf("1") }
@@ -373,14 +378,23 @@ private fun CreateItemDialog(viewModel: HomeViewModel, onClose: () -> Unit) {
                     label = { Text("Descrizione (opzionale)") },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
+                TagSelector(
+                    all = tags,
+                    selected = selectedTags,
+                    onToggle = { id ->
+                        selectedTags = if (id in selectedTags) selectedTags - id else selectedTags + id
+                    },
+                    onCreate = { nm -> viewModel.createTag(nm) { t -> selectedTags = selectedTags + t.id } },
+                )
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
                     val q = quantity.replace(',', '.').toDoubleOrNull() ?: 1.0
-                    viewModel.createItem(name, q, description, manufacturer, model, selectedLocId)
-                    onClose()
+                    viewModel.createItem(name, q, description, manufacturer, model, selectedLocId, selectedTags.toList())
+                    // Chiusura su saveSuccess.
                 },
                 enabled = name.isNotBlank() && !state.saving,
             ) { Text("Crea") }
@@ -397,6 +411,12 @@ private fun EditEntityDialog(viewModel: HomeViewModel, entity: EntityDetail, onC
     val state by viewModel.state.collectAsState()
     val locations = remember { viewModel.locations }
     val isLocation = entity.isLocation
+    val tags by viewModel.tags.collectAsState()
+    var selectedTags by remember(entity.id) { mutableStateOf(entity.tagIds.toSet()) }
+
+    // Chiudi la scheda SOLO quando il salvataggio va a buon fine: su errore
+    // resta aperta con tutte le modifiche.
+    LaunchedEffect(entity.id) { viewModel.saveSuccess.collect { onClose() } }
 
     var name by remember { mutableStateOf(entity.name) }
     var description by remember { mutableStateOf(entity.description ?: "") }
@@ -491,10 +511,10 @@ private fun EditEntityDialog(viewModel: HomeViewModel, entity: EntityDetail, onC
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = purchaseDate, onValueChange = { purchaseDate = it },
-                        label = { Text("Data acquisto (AAAA-MM-GG)") }, singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                    DateField(
+                        label = "Data acquisto",
+                        isoValue = purchaseDate,
+                        onChange = { purchaseDate = it ?: "" },
                     )
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
@@ -508,10 +528,10 @@ private fun EditEntityDialog(viewModel: HomeViewModel, entity: EntityDetail, onC
                         Switch(checked = lifetime, onCheckedChange = { lifetime = it })
                     }
                     if (!lifetime) {
-                        OutlinedTextField(
-                            value = warranty, onValueChange = { warranty = it },
-                            label = { Text("Scadenza garanzia (AAAA-MM-GG)") }, singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
+                        DateField(
+                            label = "Scadenza garanzia",
+                            isoValue = warranty,
+                            onChange = { warranty = it ?: "" },
                         )
                     }
                     Spacer(Modifier.height(8.dp))
@@ -519,6 +539,15 @@ private fun EditEntityDialog(viewModel: HomeViewModel, entity: EntityDetail, onC
                         value = notes, onValueChange = { notes = it },
                         label = { Text("Note") },
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TagSelector(
+                        all = tags,
+                        selected = selectedTags,
+                        onToggle = { id ->
+                            selectedTags = if (id in selectedTags) selectedTags - id else selectedTags + id
+                        },
+                        onCreate = { nm -> viewModel.createTag(nm) { t -> selectedTags = selectedTags + t.id } },
                     )
                     Spacer(Modifier.height(8.dp))
                 }
@@ -550,9 +579,10 @@ private fun EditEntityDialog(viewModel: HomeViewModel, entity: EntityDetail, onC
                         lifetimeWarranty = if (isLocation) false else lifetime,
                         locationId = if (isLocation) null else selectedId,
                         parentId = selectedId,
+                        tagIds = if (isLocation) emptyList() else selectedTags.toList(),
                     )
                     viewModel.updateEntity(entity.id, edit)
-                    onClose()
+                    // La chiusura avviene su saveSuccess: su errore la scheda resta.
                 },
                 enabled = name.isNotBlank() && !state.saving,
             ) { Text("Salva") }

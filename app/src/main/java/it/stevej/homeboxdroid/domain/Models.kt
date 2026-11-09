@@ -43,6 +43,7 @@ data class EntityDetail(
     val typeName: String?,
     val isLocation: Boolean,
     val tags: List<String>,
+    val tagIds: List<String>,
     val childrenCount: Int,
     val locationId: String?,
     val parentId: String?,
@@ -70,4 +71,11 @@ data class LocationRef(
     val id: String,
     val name: String,
     val depth: Int,
+)
+
+/** Tag/etichetta. */
+data class Tag(
+    val id: String,
+    val name: String,
+    val color: String?,
 )
