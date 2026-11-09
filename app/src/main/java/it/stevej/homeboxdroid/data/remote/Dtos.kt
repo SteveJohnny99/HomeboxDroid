@@ -108,6 +108,52 @@ data class EntityOutDto(
     val parent: EntitySummaryDto? = null,
     val children: List<EntitySummaryDto>? = null,
     val tags: List<TagSummaryDto>? = null,
+    val fields: List<EntityFieldDataDto>? = null,
+    val soldDate: String? = null,
+    val soldPrice: Double? = null,
+    val soldTo: String? = null,
+    val soldNotes: String? = null,
+)
+
+@Serializable
+data class EntityFieldDataDto(
+    val id: String? = null,
+    val name: String? = null,
+    val type: String? = null,
+    val textValue: String? = null,
+    val numberValue: Int? = null,
+    val booleanValue: Boolean? = null,
+)
+
+@Serializable
+data class EntityUpdateDto(
+    val id: String,
+    val name: String,
+    val description: String? = null,
+    val notes: String? = null,
+    val quantity: Double? = null,
+    val manufacturer: String? = null,
+    val modelNumber: String? = null,
+    val serialNumber: String? = null,
+    val assetId: String? = null,
+    val entityTypeId: String? = null,
+    val locationId: String? = null,
+    val parentId: String? = null,
+    val archived: Boolean? = null,
+    val insured: Boolean? = null,
+    val lifetimeWarranty: Boolean? = null,
+    val warrantyExpires: String? = null,
+    val warrantyDetails: String? = null,
+    val purchaseFrom: String? = null,
+    val purchasePrice: Double? = null,
+    val purchaseDate: String? = null,
+    val soldDate: String? = null,
+    val soldPrice: Double? = null,
+    val soldTo: String? = null,
+    val soldNotes: String? = null,
+    val tagIds: List<String>? = null,
+    val fields: List<EntityFieldDataDto>? = null,
+    val syncChildEntityLocations: Boolean? = null,
 )
 
 @Serializable

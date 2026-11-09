@@ -8,14 +8,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -26,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import it.stevej.homeboxdroid.data.HomeboxRepository
 import it.stevej.homeboxdroid.domain.EntityDetail
 
 // ---------------------------------------------------------------------------
@@ -65,10 +71,70 @@ fun EntityDetailSheet(viewModel: HomeViewModel) {
                     }
                 is HomeViewModel.DetailState.Error ->
                     Text(d.message, color = MaterialTheme.colorScheme.error)
-                is HomeViewModel.DetailState.Ready -> DetailBody(d.entity)
+                is HomeViewModel.DetailState.Ready -> DetailContent(viewModel, d.entity)
                 else -> Unit
             }
         }
+    }
+}
+
+@Composable
+private fun DetailContent(viewModel: HomeViewModel, entity: EntityDetail) {
+    val state by viewModel.state.collectAsState()
+    var editing by remember(entity.id) { mutableStateOf(false) }
+    var confirmDelete by remember(entity.id) { mutableStateOf(false) }
+
+    DetailBody(entity)
+
+    Spacer(Modifier.height(20.dp))
+    Row(modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = { editing = true },
+            enabled = !state.saving,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.weight(1f),
+        ) {
+            Icon(Icons.Outlined.Edit, contentDescription = null)
+            Text("  Modifica")
+        }
+        Spacer(Modifier.width(12.dp))
+        OutlinedButton(
+            onClick = { confirmDelete = true },
+            enabled = !state.saving,
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            modifier = Modifier.weight(1f),
+        ) {
+            Icon(Icons.Outlined.Delete, contentDescription = null)
+            Text("  Elimina")
+        }
+    }
+
+    if (editing) {
+        EditEntityDialog(viewModel, entity, onClose = { editing = false })
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { if (!state.saving) confirmDelete = false },
+            title = { Text(if (entity.isLocation) "Eliminare il luogo?" else "Eliminare l'oggetto?") },
+            text = {
+                Text(
+                    if (entity.isLocation)
+                        "\"${entity.name}\" e il suo contenuto verranno eliminati. L'azione non e' reversibile."
+                    else
+                        "\"${entity.name}\" verra' eliminato. L'azione non e' reversibile."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.deleteEntity(entity.id); confirmDelete = false },
+                    enabled = !state.saving,
+                ) { Text("Elimina", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }, enabled = !state.saving) { Text("Annulla") }
+            },
+        )
     }
 }
 
@@ -318,6 +384,178 @@ private fun CreateItemDialog(viewModel: HomeViewModel, onClose: () -> Unit) {
                 },
                 enabled = name.isNotBlank() && !state.saving,
             ) { Text("Crea") }
+        },
+        dismissButton = {
+            TextButton(onClick = onClose, enabled = !state.saving) { Text("Annulla") }
+        },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditEntityDialog(viewModel: HomeViewModel, entity: EntityDetail, onClose: () -> Unit) {
+    val state by viewModel.state.collectAsState()
+    val locations = remember { viewModel.locations }
+    val isLocation = entity.isLocation
+
+    var name by remember { mutableStateOf(entity.name) }
+    var description by remember { mutableStateOf(entity.description ?: "") }
+    var quantity by remember { mutableStateOf(entity.quantity?.let { formatQty(it) } ?: "1") }
+    var manufacturer by remember { mutableStateOf(entity.manufacturer ?: "") }
+    var model by remember { mutableStateOf(entity.modelNumber ?: "") }
+    var serial by remember { mutableStateOf(entity.serialNumber ?: "") }
+    var notes by remember { mutableStateOf(entity.notes ?: "") }
+    var price by remember { mutableStateOf(entity.purchasePrice?.let { "%.2f".format(it) } ?: "") }
+    var purchaseDate by remember { mutableStateOf(entity.purchaseDate ?: "") }
+    var purchaseFrom by remember { mutableStateOf(entity.purchaseFrom ?: "") }
+    var warranty by remember { mutableStateOf(entity.warrantyExpires ?: "") }
+    var lifetime by remember { mutableStateOf(entity.lifetimeWarranty) }
+
+    var selectedId by remember { mutableStateOf(if (isLocation) entity.parentId else entity.locationId) }
+    var expanded by remember { mutableStateOf(false) }
+
+    val options: List<Pair<String?, String>> = buildList {
+        if (isLocation) add(null to "Nessuno (radice)")
+        locations.filter { it.id != entity.id }.forEach { add(it.id to ("  ".repeat(it.depth) + it.name)) }
+    }
+    val selectedLabel = options.firstOrNull { it.first == selectedId }?.second
+        ?: if (isLocation) "Nessuno (radice)" else "Nessuna"
+
+    AlertDialog(
+        onDismissRequest = { if (!state.saving) onClose() },
+        title = { Text(if (isLocation) "Modifica luogo" else "Modifica oggetto") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it },
+                    label = { Text("Nome") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+
+                if (!isLocation) {
+                    OutlinedTextField(
+                        value = quantity, onValueChange = { quantity = it },
+                        label = { Text("Quantita'") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (options.isNotEmpty()) {
+                    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+                        OutlinedTextField(
+                            value = selectedLabel, onValueChange = {}, readOnly = true,
+                            label = { Text(if (isLocation) "Luogo superiore" else "Posizione") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expanded, onDismissRequest = { expanded = false },
+                        ) {
+                            options.forEach { (id, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = { selectedId = id; expanded = false },
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (!isLocation) {
+                    OutlinedTextField(
+                        value = manufacturer, onValueChange = { manufacturer = it },
+                        label = { Text("Produttore") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = model, onValueChange = { model = it },
+                        label = { Text("Modello") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = serial, onValueChange = { serial = it },
+                        label = { Text("Numero seriale") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = price, onValueChange = { price = it },
+                        label = { Text("Prezzo d'acquisto") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = purchaseDate, onValueChange = { purchaseDate = it },
+                        label = { Text("Data acquisto (AAAA-MM-GG)") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = purchaseFrom, onValueChange = { purchaseFrom = it },
+                        label = { Text("Acquistato da") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Garanzia a vita", modifier = Modifier.weight(1f))
+                        Switch(checked = lifetime, onCheckedChange = { lifetime = it })
+                    }
+                    if (!lifetime) {
+                        OutlinedTextField(
+                            value = warranty, onValueChange = { warranty = it },
+                            label = { Text("Scadenza garanzia (AAAA-MM-GG)") }, singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = notes, onValueChange = { notes = it },
+                        label = { Text("Note") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                OutlinedTextField(
+                    value = description, onValueChange = { description = it },
+                    label = { Text("Descrizione") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val q = quantity.replace(',', '.').toDoubleOrNull()
+                    val p = price.replace(',', '.').toDoubleOrNull()
+                    val edit = HomeboxRepository.EntityEdit(
+                        name = name,
+                        description = description,
+                        notes = if (isLocation) null else notes,
+                        quantity = if (isLocation) null else q,
+                        manufacturer = if (isLocation) null else manufacturer,
+                        modelNumber = if (isLocation) null else model,
+                        serialNumber = if (isLocation) null else serial,
+                        purchasePrice = if (isLocation) null else p,
+                        purchaseDate = if (isLocation) null else purchaseDate,
+                        purchaseFrom = if (isLocation) null else purchaseFrom,
+                        warrantyExpires = if (isLocation) null else warranty,
+                        lifetimeWarranty = if (isLocation) false else lifetime,
+                        locationId = if (isLocation) null else selectedId,
+                        parentId = selectedId,
+                    )
+                    viewModel.updateEntity(entity.id, edit)
+                    onClose()
+                },
+                enabled = name.isNotBlank() && !state.saving,
+            ) { Text("Salva") }
         },
         dismissButton = {
             TextButton(onClick = onClose, enabled = !state.saving) { Text("Annulla") }

@@ -154,6 +154,35 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    fun updateEntity(id: String, edit: HomeboxRepository.EntityEdit) {
+        if (edit.name.isBlank()) return
+        _state.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            when (val r = repo.updateEntity(id, edit)) {
+                is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
+                is ApiResult.Success -> {
+                    _state.update { it.copy(saving = false, message = "Modifiche salvate.") }
+                    closeDetail()
+                    refresh()
+                }
+            }
+        }
+    }
+
+    fun deleteEntity(id: String) {
+        _state.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            when (val r = repo.deleteEntity(id)) {
+                is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
+                is ApiResult.Success -> {
+                    _state.update { it.copy(saving = false, message = "Eliminato.") }
+                    closeDetail()
+                    refresh()
+                }
+            }
+        }
+    }
+
     fun consumeMessage() = _state.update { it.copy(message = null) }
 
     sealed interface DetailState {

@@ -3,6 +3,7 @@ package it.stevej.homeboxdroid.data
 import it.stevej.homeboxdroid.data.remote.EntityCreateDto
 import it.stevej.homeboxdroid.data.remote.EntityOutDto
 import it.stevej.homeboxdroid.data.remote.EntityTypeSummaryDto
+import it.stevej.homeboxdroid.data.remote.EntityUpdateDto
 import it.stevej.homeboxdroid.data.remote.HomeboxApi
 import it.stevej.homeboxdroid.data.remote.LoginFormDto
 import it.stevej.homeboxdroid.data.remote.TreeItemDto
@@ -240,6 +241,77 @@ class HomeboxRepository @Inject constructor(
         }
     }
 
+    // --- Modifica / eliminazione --------------------------------------------
+
+    /** Campi modificabili dall'utente. Le date sono "yyyy-MM-dd" o null. */
+    data class EntityEdit(
+        val name: String,
+        val description: String?,
+        val notes: String?,
+        val quantity: Double?,
+        val manufacturer: String?,
+        val modelNumber: String?,
+        val serialNumber: String?,
+        val purchasePrice: Double?,
+        val purchaseDate: String?,
+        val purchaseFrom: String?,
+        val warrantyExpires: String?,
+        val lifetimeWarranty: Boolean,
+        val locationId: String?,
+        val parentId: String?,
+    )
+
+    suspend fun updateEntity(id: String, edit: EntityEdit): ApiResult<Unit> =
+        withContext(Dispatchers.IO) {
+            // Rileggo lo stato attuale per preservare i campi non modificati
+            // (entityType, tag, custom fields, insured, archived, sold*, ecc.):
+            // il PUT e' un update completo.
+            val current = when (val r = safeApiCall { api.entity(id) }) {
+                is ApiResult.Error -> return@withContext ApiResult.Error(r.message, r.code)
+                is ApiResult.Success -> r.data
+            }
+            val body = EntityUpdateDto(
+                id = id,
+                name = edit.name.trim(),
+                description = edit.description?.trim()?.ifBlank { null },
+                notes = edit.notes?.trim()?.ifBlank { null },
+                quantity = edit.quantity,
+                manufacturer = edit.manufacturer?.trim()?.ifBlank { null },
+                modelNumber = edit.modelNumber?.trim()?.ifBlank { null },
+                serialNumber = edit.serialNumber?.trim()?.ifBlank { null },
+                purchasePrice = edit.purchasePrice,
+                purchaseDate = toRfc3339(edit.purchaseDate),
+                purchaseFrom = edit.purchaseFrom?.trim()?.ifBlank { null },
+                lifetimeWarranty = edit.lifetimeWarranty,
+                warrantyExpires = if (edit.lifetimeWarranty) null else toRfc3339(edit.warrantyExpires),
+                locationId = edit.locationId,
+                parentId = edit.parentId,
+                // Preservati dallo stato attuale:
+                entityTypeId = current.entityType?.id,
+                assetId = current.assetId,
+                archived = current.archived,
+                insured = current.insured,
+                warrantyDetails = current.warrantyDetails,
+                soldDate = current.soldDate,
+                soldPrice = current.soldPrice,
+                soldTo = current.soldTo,
+                soldNotes = current.soldNotes,
+                tagIds = current.tags?.mapNotNull { it.id },
+                fields = current.fields,
+            )
+            when (val r = safeApiCall { api.updateEntity(id, body) }) {
+                is ApiResult.Error -> ApiResult.Error(r.message, r.code)
+                is ApiResult.Success -> ApiResult.Success(Unit)
+            }
+        }
+
+    suspend fun deleteEntity(id: String): ApiResult<Unit> = withContext(Dispatchers.IO) {
+        when (val r = safeApiCall { api.deleteEntity(id) }) {
+            is ApiResult.Error -> ApiResult.Error(r.message, r.code)
+            is ApiResult.Success -> ApiResult.Success(Unit)
+        }
+    }
+
     // --- Mapping ------------------------------------------------------------
 
     private fun TreeItemDto.toNode(): EntityNode = EntityNode(
@@ -281,6 +353,8 @@ class HomeboxRepository @Inject constructor(
         isLocation = entityType?.isLocation ?: false,
         tags = tags?.mapNotNull { it.name } ?: emptyList(),
         childrenCount = children?.size ?: 0,
+        locationId = locationId ?: location?.id,
+        parentId = parent?.id,
     )
 
     // --- Util ---------------------------------------------------------------
@@ -296,6 +370,12 @@ class HomeboxRepository @Inject constructor(
         var c = raw.trim()
         if (c.startsWith("Bearer ", ignoreCase = true)) c = c.substring(7).trim()
         return c
+    }
+
+    /** "yyyy-MM-dd" -> "yyyy-MM-ddT00:00:00Z"; stringhe gia' complete restano tali. */
+    private fun toRfc3339(date: String?): String? {
+        val d = date?.trim()?.ifBlank { null } ?: return null
+        return if (d.length == 10 && d[4] == '-' && d[7] == '-') "${d}T00:00:00Z" else d
     }
 
     companion object {

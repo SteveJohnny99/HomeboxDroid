@@ -44,6 +44,8 @@ data class EntityDetail(
     val isLocation: Boolean,
     val tags: List<String>,
     val childrenCount: Int,
+    val locationId: String?,
+    val parentId: String?,
 )
 
 /** Statistiche di gruppo per la dashboard. */
