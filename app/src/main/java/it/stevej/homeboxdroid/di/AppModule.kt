@@ -4,18 +4,17 @@ import it.stevej.homeboxdroid.data.SecureSettings
 import it.stevej.homeboxdroid.data.remote.AuthInterceptor
 import it.stevej.homeboxdroid.data.remote.BaseUrlInterceptor
 import it.stevej.homeboxdroid.data.remote.HomeboxApi
+import it.stevej.homeboxdroid.data.remote.KotlinxJsonConverterFactory
 import it.stevej.homeboxdroid.data.remote.TlsFactory
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
-import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
@@ -60,7 +59,6 @@ object AppModule {
             .build()
     }
 
-    @OptIn(ExperimentalSerializationApi::class)
     @Provides
     @Singleton
     fun provideRetrofit(client: OkHttpClient, json: Json): Retrofit {
@@ -68,7 +66,7 @@ object AppModule {
         return Retrofit.Builder()
             .baseUrl(PLACEHOLDER_BASE)
             .client(client)
-            .addConverterFactory(json.asConverterFactory(contentType))
+            .addConverterFactory(KotlinxJsonConverterFactory(json, contentType))
             .build()
     }
 
