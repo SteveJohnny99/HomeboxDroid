@@ -1,0 +1,72 @@
+package it.stevej.homeboxdroid.data.remote
+
+import retrofit2.http.Body
+import retrofit2.http.DELETE
+import retrofit2.http.GET
+import retrofit2.http.POST
+import retrofit2.http.Path
+import retrofit2.http.Query
+
+/**
+ * Interfaccia Retrofit per l'API Homebox v0.26.x.
+ * La base URL e' un placeholder: BaseUrlInterceptor riscrive scheme/host/porta
+ * in base all'istanza configurata dall'utente. I path includono gia' /api.
+ */
+interface HomeboxApi {
+
+    @GET("v1/status")
+    suspend fun status(): StatusDto
+
+    @POST("v1/users/login")
+    suspend fun login(@Body body: LoginFormDto): TokenResponseDto
+
+    @GET("v1/users/refresh")
+    suspend fun refresh(): TokenResponseDto
+
+    @POST("v1/users/logout")
+    suspend fun logout()
+
+    @GET("v1/users/self")
+    suspend fun self(): WrappedUserDto
+
+    // Entities
+    @GET("v1/entities")
+    suspend fun entities(
+        @Query("q") q: String? = null,
+        @Query("page") page: Int? = null,
+        @Query("pageSize") pageSize: Int? = null,
+        @Query("parentIds") parentIds: List<String>? = null,
+        @Query("entityTypeIds") entityTypeIds: List<String>? = null,
+        @Query("orderBy") orderBy: String? = null,
+    ): EntityListResultDto
+
+    @GET("v1/entities/tree")
+    suspend fun tree(@Query("withItems") withItems: Boolean = true): List<TreeItemDto>
+
+    @GET("v1/entities/{id}")
+    suspend fun entity(@Path("id") id: String): EntityOutDto
+
+    @POST("v1/entities")
+    suspend fun createEntity(@Body body: EntityCreateDto): EntityOutDto
+
+    @DELETE("v1/entities/{id}")
+    suspend fun deleteEntity(@Path("id") id: String)
+
+    // Entity types
+    @GET("v1/entity-types")
+    suspend fun entityTypes(): List<EntityTypeSummaryDto>
+
+    @POST("v1/entity-types")
+    suspend fun createEntityType(@Body body: EntityTypeCreateDto): EntityTypeSummaryDto
+
+    // Tags
+    @GET("v1/tags")
+    suspend fun tags(): List<TagSummaryDto>
+
+    @POST("v1/tags")
+    suspend fun createTag(@Body body: TagCreateDto): TagSummaryDto
+
+    // Statistiche
+    @GET("v1/groups/statistics")
+    suspend fun statistics(): GroupStatisticsDto
+}
