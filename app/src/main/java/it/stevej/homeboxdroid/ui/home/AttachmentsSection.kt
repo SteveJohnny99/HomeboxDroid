@@ -1,5 +1,7 @@
 package it.stevej.homeboxdroid.ui.home
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -42,10 +44,38 @@ import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import it.stevej.homeboxdroid.domain.Attachment
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.max
+
+/** Lato lungo massimo e qualita' JPEG per le immagini caricate. */
+private const val MAX_IMAGE_DIM = 2048
+private const val JPEG_QUALITY = 85
+
+/**
+ * Ridimensiona (lato lungo <= MAX_IMAGE_DIM) e ricomprime in JPEG. Riduce i
+ * tempi di upload e lo spazio sul server. Ritorna null se il decode fallisce.
+ */
+private fun downscaleJpeg(raw: ByteArray): ByteArray? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    val longest = max(bounds.outWidth, bounds.outHeight)
+    while (longest / sample > MAX_IMAGE_DIM * 2) sample *= 2
+    val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+    val bmp = BitmapFactory.decodeByteArray(raw, 0, raw.size, opts) ?: return null
+    val scale = MAX_IMAGE_DIM.toFloat() / max(bmp.width, bmp.height)
+    val scaled = if (scale < 1f) {
+        Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true)
+    } else bmp
+    val out = ByteArrayOutputStream()
+    scaled.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+    return out.toByteArray()
+}
 
 /**
  * Sezione allegati nel dettaglio: miniature immagini (con auth via Coil),
@@ -75,7 +105,8 @@ fun AttachmentsSection(
     ) { success: Boolean ->
         val p = pendingPhoto
         if (success && p != null) {
-            val bytes = runCatching { p.second.readBytes() }.getOrNull()
+            val raw = runCatching { p.second.readBytes() }.getOrNull()
+            val bytes = raw?.let { downscaleJpeg(it) ?: it }
             if (bytes != null) {
                 viewModel.uploadAttachment(entityId, bytes, p.second.name, "image/jpeg")
             }
@@ -215,15 +246,18 @@ private fun uploadFromUri(
 ) {
     val resolver = context.contentResolver
     val mime = resolver.getType(uri) ?: "application/octet-stream"
-    val bytes = runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+    val raw = runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
         ?: return
-    val ext = when {
-        mime.contains("png") -> "png"
-        mime.contains("jpeg") || mime.contains("jpg") -> "jpg"
-        mime.contains("pdf") -> "pdf"
-        mime.contains("webp") -> "webp"
-        else -> "bin"
-    }
     val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-    viewModel.uploadAttachment(entityId, bytes, "IMG_$stamp.$ext", mime)
+    // Le immagini vengono ridimensionate e ricompresse in JPEG.
+    if (mime.startsWith("image/")) {
+        val bytes = downscaleJpeg(raw) ?: raw
+        viewModel.uploadAttachment(entityId, bytes, "IMG_$stamp.jpg", "image/jpeg")
+    } else {
+        val ext = when {
+            mime.contains("pdf") -> "pdf"
+            else -> "bin"
+        }
+        viewModel.uploadAttachment(entityId, raw, "FILE_$stamp.$ext", mime)
+    }
 }

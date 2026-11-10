@@ -390,6 +390,55 @@ class HomeboxRepository @Inject constructor(
             }
         }
 
+    // --- Ricerca ------------------------------------------------------------
+
+    suspend fun searchEntities(
+        query: String,
+        tagIds: List<String>,
+        matchAllTags: Boolean,
+        onlyType: SearchType,
+    ): ApiResult<List<it.stevej.homeboxdroid.domain.SearchResult>> = withContext(Dispatchers.IO) {
+        // Risolve gli eventuali tipi (location/item) in entityTypeIds.
+        val typeIds: List<String>? = when (onlyType) {
+            SearchType.ALL -> null
+            SearchType.LOCATIONS, SearchType.ITEMS -> {
+                val types = when (val r = entityTypes()) {
+                    is ApiResult.Error -> return@withContext ApiResult.Error(r.message, r.code)
+                    is ApiResult.Success -> r.data
+                }
+                val wantLocation = onlyType == SearchType.LOCATIONS
+                types.filter { it.isLocation == wantLocation }.map { it.id }.ifEmpty { null }
+            }
+        }
+        when (val r = safeApiCall {
+            api.entities(
+                q = query.trim().ifBlank { null },
+                pageSize = 100,
+                tags = tagIds.ifEmpty { null },
+                matchAllTags = if (tagIds.isEmpty()) null else matchAllTags,
+                entityTypeIds = typeIds,
+                orderBy = "name",
+            )
+        }) {
+            is ApiResult.Error -> ApiResult.Error(r.message, r.code)
+            is ApiResult.Success -> ApiResult.Success(
+                (r.data.items ?: emptyList()).mapNotNull { s ->
+                    val id = s.id ?: return@mapNotNull null
+                    it.stevej.homeboxdroid.domain.SearchResult(
+                        id = id,
+                        name = s.name ?: "(senza nome)",
+                        isLocation = s.entityType?.isLocation ?: false,
+                        typeName = s.entityType?.name,
+                        quantity = s.quantity,
+                        tags = s.tags?.mapNotNull { t -> t.name } ?: emptyList(),
+                    )
+                }
+            )
+        }
+    }
+
+    enum class SearchType { ALL, LOCATIONS, ITEMS }
+
     // --- Barcode ------------------------------------------------------------
 
     suspend fun searchBarcode(code: String): ApiResult<BarcodeResult?> =
@@ -397,7 +446,7 @@ class HomeboxRepository @Inject constructor(
             when (val r = safeApiCall { api.searchBarcode(code) }) {
                 is ApiResult.Error -> ApiResult.Error(r.message, r.code)
                 is ApiResult.Success -> {
-                    val p = r.data.firstOrNull()
+                    val p = r.data?.firstOrNull()
                     ApiResult.Success(
                         p?.let {
                             BarcodeResult(

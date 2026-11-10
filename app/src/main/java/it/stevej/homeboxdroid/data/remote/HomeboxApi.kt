@@ -42,6 +42,8 @@ interface HomeboxApi {
         @Query("pageSize") pageSize: Int? = null,
         @Query("parentIds") parentIds: List<String>? = null,
         @Query("entityTypeIds") entityTypeIds: List<String>? = null,
+        @Query("tags") tags: List<String>? = null,
+        @Query("matchAllTags") matchAllTags: Boolean? = null,
         @Query("orderBy") orderBy: String? = null,
     ): EntityListResultDto
 
@@ -91,9 +93,12 @@ interface HomeboxApi {
         @Path("attachmentId") attachmentId: String,
     )
 
-    // Ricerca prodotto da barcode (EAN/UPC)
+    // Ricerca prodotto da barcode (EAN/UPC).
+    // NB: il backend decodifica il parametro come "productEAN" (lo swagger dice
+    // erroneamente "data"); con "data" il server va in errore. 204 = nessun
+    // risultato (corpo vuoto), quindi il tipo di ritorno e' nullable.
     @GET("v1/products/search-from-barcode")
-    suspend fun searchBarcode(@Query("data") data: String): List<BarcodeProductDto>
+    suspend fun searchBarcode(@Query("productEAN") productEAN: String): List<BarcodeProductDto>?
 
     // Statistiche
     @GET("v1/groups/statistics")

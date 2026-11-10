@@ -98,3 +98,13 @@ data class BarcodeResult(
     val modelNumber: String?,
     val notes: String?,
 )
+
+/** Risultato di ricerca (entita' in forma compatta). */
+data class SearchResult(
+    val id: String,
+    val name: String,
+    val isLocation: Boolean,
+    val typeName: String?,
+    val quantity: Double?,
+    val tags: List<String>,
+)

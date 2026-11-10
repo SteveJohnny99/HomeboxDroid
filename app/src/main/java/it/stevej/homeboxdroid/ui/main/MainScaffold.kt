@@ -11,6 +11,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -49,7 +50,7 @@ import it.stevej.homeboxdroid.ui.settings.SettingsScreen
 import kotlinx.coroutines.launch
 
 enum class MainTab(val label: String) {
-    BROWSE("Sfoglia"), STATS("Statistiche"), SETTINGS("Impostazioni")
+    BROWSE("Sfoglia"), SEARCH("Cerca"), STATS("Statistiche"), SETTINGS("Impostazioni")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -87,6 +88,9 @@ fun MainScaffold(viewModel: HomeViewModel = hiltViewModel()) {
                 DrawerRow("Sfoglia", Icons.Outlined.Inventory2, tab == MainTab.BROWSE) {
                     tab = MainTab.BROWSE; scope.launch { drawerState.close() }
                 }
+                DrawerRow("Cerca", Icons.Outlined.Search, tab == MainTab.SEARCH) {
+                    tab = MainTab.SEARCH; scope.launch { drawerState.close() }
+                }
                 DrawerRow("Statistiche", Icons.Outlined.BarChart, tab == MainTab.STATS) {
                     tab = MainTab.STATS; scope.launch { drawerState.close() }
                 }
@@ -122,6 +126,10 @@ fun MainScaffold(viewModel: HomeViewModel = hiltViewModel()) {
         ) { inner ->
             when (tab) {
                 MainTab.BROWSE -> BrowseScreen(viewModel, Modifier.padding(inner))
+                MainTab.SEARCH -> it.stevej.homeboxdroid.ui.search.SearchScreen(
+                    homeViewModel = viewModel,
+                    modifier = Modifier.padding(inner),
+                )
                 MainTab.STATS -> StatsScreen(viewModel, Modifier.padding(inner))
                 MainTab.SETTINGS -> SettingsScreen(Modifier.padding(inner))
             }

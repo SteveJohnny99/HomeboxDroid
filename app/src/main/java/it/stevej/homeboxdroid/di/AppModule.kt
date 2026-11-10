@@ -59,7 +59,10 @@ object AppModule {
             .sslSocketFactory(sslFactory, trustManager)
             .hostnameVerifier(TlsFactory.hostnameVerifier(settings))
             .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            // Upload di foto/allegati: la scrittura puo' richiedere piu' tempo
+            // su reti lente o VPN, evita timeout spuri.
+            .writeTimeout(120, TimeUnit.SECONDS)
             .build()
     }
 
