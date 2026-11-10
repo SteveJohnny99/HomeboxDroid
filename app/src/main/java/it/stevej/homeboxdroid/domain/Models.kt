@@ -47,6 +47,7 @@ data class EntityDetail(
     val childrenCount: Int,
     val locationId: String?,
     val parentId: String?,
+    val attachments: List<Attachment>,
 )
 
 /** Statistiche di gruppo per la dashboard. */
@@ -78,4 +79,22 @@ data class Tag(
     val id: String,
     val name: String,
     val color: String?,
+)
+
+/** Allegato di un'entita'. */
+data class Attachment(
+    val id: String,
+    val title: String,
+    val mimeType: String?,
+    val primary: Boolean,
+) {
+    val isImage: Boolean get() = mimeType?.startsWith("image/") == true
+}
+
+/** Dati prodotto recuperati da un barcode. */
+data class BarcodeResult(
+    val name: String?,
+    val manufacturer: String?,
+    val modelNumber: String?,
+    val notes: String?,
 )

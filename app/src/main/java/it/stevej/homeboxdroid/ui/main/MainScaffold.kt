@@ -2,6 +2,7 @@ package it.stevej.homeboxdroid.ui.main
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -136,6 +137,22 @@ fun MainScaffold(viewModel: HomeViewModel = hiltViewModel()) {
         show = showCreateChooser,
         onDismiss = { showCreateChooser = false },
     )
+
+    // Scanner barcode a schermo intero (in creazione oggetto). Il dialog e'
+    // chiuso durante la scansione, quindi niente conflitti di z-order.
+    val scannerForItem by viewModel.scannerForItem.collectAsState()
+    if (scannerForItem) {
+        androidx.compose.material3.Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = androidx.compose.ui.graphics.Color.Black,
+        ) {
+            it.stevej.homeboxdroid.ui.scan.BarcodeScannerScreen(
+                title = "Scansiona il codice a barre",
+                onResult = { code -> viewModel.onItemBarcode(code) },
+                onCancel = { viewModel.cancelScan() },
+            )
+        }
+    }
 }
 
 @Composable

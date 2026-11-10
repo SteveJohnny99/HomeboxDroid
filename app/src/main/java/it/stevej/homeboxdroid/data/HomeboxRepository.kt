@@ -8,6 +8,8 @@ import it.stevej.homeboxdroid.data.remote.HomeboxApi
 import it.stevej.homeboxdroid.data.remote.LoginFormDto
 import it.stevej.homeboxdroid.data.remote.TagCreateDto
 import it.stevej.homeboxdroid.data.remote.TreeItemDto
+import it.stevej.homeboxdroid.domain.Attachment
+import it.stevej.homeboxdroid.domain.BarcodeResult
 import it.stevej.homeboxdroid.domain.EntityDetail
 import it.stevej.homeboxdroid.domain.EntityNode
 import it.stevej.homeboxdroid.domain.EntityType
@@ -18,6 +20,9 @@ import it.stevej.homeboxdroid.domain.Tag
 import it.stevej.homeboxdroid.domain.UserInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -340,6 +345,73 @@ class HomeboxRepository @Inject constructor(
         }
     }
 
+    // --- Allegati -----------------------------------------------------------
+
+    /** URL assoluto per scaricare un allegato (usato da Coil con auth). */
+    fun attachmentUrl(entityId: String, attachmentId: String): String {
+        val base = settings.serverUrl?.trimEnd('/') ?: ""
+        return "$base/api/v1/entities/$entityId/attachments/$attachmentId"
+    }
+
+    suspend fun uploadAttachment(
+        entityId: String,
+        bytes: ByteArray,
+        filename: String,
+        mime: String,
+        primary: Boolean,
+    ): ApiResult<Unit> = withContext(Dispatchers.IO) {
+        val media = mime.toMediaTypeOrNull()
+        val filePart = MultipartBody.Part.createFormData(
+            name = "file",
+            filename = filename,
+            body = bytes.toRequestBody(media),
+        )
+        val text = "text/plain".toMediaTypeOrNull()
+        val type = if (mime.startsWith("image/")) "photo" else "attachment"
+        when (val r = safeApiCall {
+            api.uploadAttachment(
+                id = entityId,
+                file = filePart,
+                name = filename.toRequestBody(text),
+                type = type.toRequestBody(text),
+                primary = primary.toString().toRequestBody(text),
+            )
+        }) {
+            is ApiResult.Error -> ApiResult.Error(r.message, r.code)
+            is ApiResult.Success -> ApiResult.Success(Unit)
+        }
+    }
+
+    suspend fun deleteAttachment(entityId: String, attachmentId: String): ApiResult<Unit> =
+        withContext(Dispatchers.IO) {
+            when (val r = safeApiCall { api.deleteAttachment(entityId, attachmentId) }) {
+                is ApiResult.Error -> ApiResult.Error(r.message, r.code)
+                is ApiResult.Success -> ApiResult.Success(Unit)
+            }
+        }
+
+    // --- Barcode ------------------------------------------------------------
+
+    suspend fun searchBarcode(code: String): ApiResult<BarcodeResult?> =
+        withContext(Dispatchers.IO) {
+            when (val r = safeApiCall { api.searchBarcode(code) }) {
+                is ApiResult.Error -> ApiResult.Error(r.message, r.code)
+                is ApiResult.Success -> {
+                    val p = r.data.firstOrNull()
+                    ApiResult.Success(
+                        p?.let {
+                            BarcodeResult(
+                                name = it.item?.name?.ifBlank { null },
+                                manufacturer = it.manufacturer?.ifBlank { null },
+                                modelNumber = it.modelNumber?.ifBlank { null },
+                                notes = it.notes?.ifBlank { null },
+                            )
+                        }
+                    )
+                }
+            }
+        }
+
     // --- Mapping ------------------------------------------------------------
 
     private fun TreeItemDto.toNode(): EntityNode = EntityNode(
@@ -384,6 +456,15 @@ class HomeboxRepository @Inject constructor(
         childrenCount = children?.size ?: 0,
         locationId = locationId ?: location?.id,
         parentId = parent?.id,
+        attachments = attachments?.mapNotNull { a ->
+            val aid = a.id ?: return@mapNotNull null
+            Attachment(
+                id = aid,
+                title = a.title ?: a.path?.substringAfterLast('/') ?: "allegato",
+                mimeType = a.mimeType,
+                primary = a.primary ?: false,
+            )
+        }?.sortedByDescending { it.primary } ?: emptyList(),
     )
 
     // --- Util ---------------------------------------------------------------

@@ -38,6 +38,40 @@ class OnboardingViewModel @Inject constructor(
 
     fun onUrl(v: String) = _state.update { it.copy(serverUrl = v, error = null) }
     fun onApiKey(v: String) = _state.update { it.copy(apiKey = v, error = null) }
+
+    /**
+     * Applica il contenuto di un QR scansionato. Formati riconosciuti:
+     * - URL custom: homeboxdroid://connect?url=...&key=...
+     * - JSON: {"url":"...","key":"..."}
+     * - testo semplice: se inizia con http -> URL; se inizia con hb_ -> API key.
+     */
+    fun applyScanned(raw: String) {
+        val text = raw.trim()
+        var url: String? = null
+        var key: String? = null
+        when {
+            text.startsWith("homeboxdroid://", ignoreCase = true) -> {
+                val uri = runCatching { android.net.Uri.parse(text) }.getOrNull()
+                url = uri?.getQueryParameter("url")
+                key = uri?.getQueryParameter("key")
+            }
+            text.startsWith("{") -> {
+                url = Regex("\"url\"\\s*:\\s*\"([^\"]+)\"").find(text)?.groupValues?.getOrNull(1)
+                key = Regex("\"(?:key|apiKey|token)\"\\s*:\\s*\"([^\"]+)\"").find(text)?.groupValues?.getOrNull(1)
+            }
+            text.startsWith("http://", true) || text.startsWith("https://", true) -> url = text
+            text.startsWith("hb_") -> key = text
+            else -> key = text
+        }
+        _state.update {
+            it.copy(
+                serverUrl = url?.ifBlank { null } ?: it.serverUrl,
+                apiKey = key?.ifBlank { null } ?: it.apiKey,
+                emailMode = if (key != null) false else it.emailMode,
+                error = null,
+            )
+        }
+    }
     fun onEmail(v: String) = _state.update { it.copy(email = v, error = null) }
     fun onPassword(v: String) = _state.update { it.copy(password = v, error = null) }
     fun onSelfSigned(v: Boolean) = _state.update { it.copy(allowSelfSigned = v) }

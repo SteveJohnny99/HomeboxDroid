@@ -18,6 +18,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -86,6 +87,14 @@ private fun DetailContent(viewModel: HomeViewModel, entity: EntityDetail) {
     var confirmDelete by remember(entity.id) { mutableStateOf(false) }
 
     DetailBody(entity)
+
+    Spacer(Modifier.height(20.dp))
+    AttachmentsSection(
+        viewModel = viewModel,
+        entityId = entity.id,
+        attachments = entity.attachments,
+        enabled = !state.saving,
+    )
 
     Spacer(Modifier.height(20.dp))
     Row(modifier = Modifier.fillMaxWidth()) {
@@ -206,7 +215,7 @@ private fun formatQty(q: Double): String =
 @Composable
 fun CreateDialogs(viewModel: HomeViewModel, show: Boolean, onDismiss: () -> Unit) {
     var openLocation by remember { mutableStateOf(false) }
-    var openItem by remember { mutableStateOf(false) }
+    val showItem by viewModel.showCreateItem.collectAsState()
 
     if (show) {
         ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -224,7 +233,7 @@ fun CreateDialogs(viewModel: HomeViewModel, show: Boolean, onDismiss: () -> Unit
                 }
                 Spacer(Modifier.height(12.dp))
                 OutlinedButton(
-                    onClick = { onDismiss(); openItem = true },
+                    onClick = { onDismiss(); viewModel.openCreateItem() },
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -240,8 +249,8 @@ fun CreateDialogs(viewModel: HomeViewModel, show: Boolean, onDismiss: () -> Unit
     if (openLocation) {
         CreateLocationDialog(viewModel, onClose = { openLocation = false })
     }
-    if (openItem) {
-        CreateItemDialog(viewModel, onClose = { openItem = false })
+    if (showItem) {
+        CreateItemDialog(viewModel, onClose = { viewModel.closeCreateItem() })
     }
 }
 
@@ -300,11 +309,13 @@ private fun CreateItemDialog(viewModel: HomeViewModel, onClose: () -> Unit) {
     var selectedTags by remember { mutableStateOf(emptySet<String>()) }
     LaunchedEffect(Unit) { viewModel.saveSuccess.collect { onClose() } }
 
-    var name by remember { mutableStateOf("") }
+    // Precompilazione da barcode (consumata una sola volta all'apertura).
+    val prefill = remember { viewModel.consumeItemPrefill() }
+    var name by remember { mutableStateOf(prefill?.name ?: "") }
     var quantity by remember { mutableStateOf("1") }
     var description by remember { mutableStateOf("") }
-    var manufacturer by remember { mutableStateOf("") }
-    var model by remember { mutableStateOf("") }
+    var manufacturer by remember { mutableStateOf(prefill?.manufacturer ?: "") }
+    var model by remember { mutableStateOf(prefill?.modelNumber ?: "") }
 
     val defaultLoc = state.currentLocationId
     var selectedLocId by remember { mutableStateOf(defaultLoc ?: locations.firstOrNull()?.id) }
@@ -317,6 +328,16 @@ private fun CreateItemDialog(viewModel: HomeViewModel, onClose: () -> Unit) {
         title = { Text("Nuovo oggetto") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedButton(
+                    onClick = { viewModel.startItemBarcodeScan() },
+                    enabled = !state.saving,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
+                    Text("  Scansiona codice a barre")
+                }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = name, onValueChange = { name = it },
                     label = { Text("Nome") }, singleLine = true,

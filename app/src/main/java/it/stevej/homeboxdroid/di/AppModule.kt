@@ -1,5 +1,9 @@
 package it.stevej.homeboxdroid.di
 
+import android.content.Context
+import coil.ImageLoader
+import coil.disk.DiskCache
+import dagger.hilt.android.qualifiers.ApplicationContext
 import it.stevej.homeboxdroid.data.SecureSettings
 import it.stevej.homeboxdroid.data.remote.AuthInterceptor
 import it.stevej.homeboxdroid.data.remote.BaseUrlInterceptor
@@ -73,4 +77,34 @@ object AppModule {
     @Provides
     @Singleton
     fun provideApi(retrofit: Retrofit): HomeboxApi = retrofit.create(HomeboxApi::class.java)
+
+    /**
+     * ImageLoader di Coil per gli allegati: client dedicato con auth e TLS ma
+     * SENZA riscrittura base-url (le immagini usano URL assoluti verso l'istanza).
+     */
+    @Provides
+    @Singleton
+    fun provideImageLoader(
+        @ApplicationContext context: Context,
+        settings: SecureSettings,
+    ): ImageLoader {
+        val (sslFactory, trustManager) = TlsFactory.socketFactory(settings)
+        val client = OkHttpClient.Builder()
+            .addInterceptor(AuthInterceptor(settings))
+            .sslSocketFactory(sslFactory, trustManager)
+            .hostnameVerifier(TlsFactory.hostnameVerifier(settings))
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+        return ImageLoader.Builder(context)
+            .okHttpClient(client)
+            .diskCache(
+                DiskCache.Builder()
+                    .directory(context.cacheDir.resolve("image_cache"))
+                    .maxSizePercent(0.02)
+                    .build()
+            )
+            .crossfade(true)
+            .build()
+    }
 }

@@ -108,11 +108,40 @@ data class EntityOutDto(
     val parent: EntitySummaryDto? = null,
     val children: List<EntitySummaryDto>? = null,
     val tags: List<TagSummaryDto>? = null,
+    val attachments: List<ItemAttachmentDto>? = null,
     val fields: List<EntityFieldDataDto>? = null,
     val soldDate: String? = null,
     val soldPrice: Double? = null,
     val soldTo: String? = null,
     val soldNotes: String? = null,
+)
+
+@Serializable
+data class ItemAttachmentDto(
+    val id: String? = null,
+    val title: String? = null,
+    val type: String? = null,
+    val mimeType: String? = null,
+    val primary: Boolean? = null,
+    val path: String? = null,
+    val createdAt: String? = null,
+)
+
+@Serializable
+data class BarcodeProductDto(
+    val barcode: String? = null,
+    val item: BarcodeItemDto? = null,
+    val manufacturer: String? = null,
+    val modelNumber: String? = null,
+    val notes: String? = null,
+    val imageURL: String? = null,
+    val search_engine_name: String? = null,
+)
+
+@Serializable
+data class BarcodeItemDto(
+    val name: String? = null,
+    val description: String? = null,
 )
 
 @Serializable

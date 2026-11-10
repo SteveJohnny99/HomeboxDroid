@@ -33,8 +33,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -42,7 +43,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import kotlinx.coroutines.launch
+import it.stevej.homeboxdroid.ui.scan.BarcodeScannerScreen
 
 /**
  * Onboarding funzionante (M1): URL + API Key (predefinito) oppure email/password.
@@ -52,7 +53,16 @@ import kotlinx.coroutines.launch
 fun OnboardingScreen(viewModel: OnboardingViewModel = hiltViewModel()) {
     val s by viewModel.state.collectAsState()
     val snackbar = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
+    var showScanner by remember { mutableStateOf(false) }
+
+    if (showScanner) {
+        BarcodeScannerScreen(
+            title = "Scansiona QR di configurazione",
+            onResult = { value -> viewModel.applyScanned(value); showScanner = false },
+            onCancel = { showScanner = false },
+        )
+        return
+    }
 
     val gradient = Brush.verticalGradient(
         colors = listOf(
@@ -112,11 +122,7 @@ fun OnboardingScreen(viewModel: OnboardingViewModel = hiltViewModel()) {
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                snackbar.showMessage("Scansione QR in arrivo in una prossima versione.")
-                            }
-                        },
+                        onClick = { showScanner = true },
                         enabled = !s.loading,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth(),
@@ -209,6 +215,3 @@ fun OnboardingScreen(viewModel: OnboardingViewModel = hiltViewModel()) {
     }
 }
 
-private suspend fun SnackbarHostState.showMessage(msg: String) {
-    showSnackbar(msg)
-}

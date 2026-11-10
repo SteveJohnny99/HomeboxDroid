@@ -1,10 +1,14 @@
 package it.stevej.homeboxdroid.data.remote
 
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.PUT
+import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -69,6 +73,27 @@ interface HomeboxApi {
 
     @POST("v1/tags")
     suspend fun createTag(@Body body: TagCreateDto): TagSummaryDto
+
+    // Allegati
+    @Multipart
+    @POST("v1/entities/{id}/attachments")
+    suspend fun uploadAttachment(
+        @Path("id") id: String,
+        @Part file: MultipartBody.Part,
+        @Part("name") name: RequestBody,
+        @Part("type") type: RequestBody,
+        @Part("primary") primary: RequestBody,
+    ): EntityOutDto
+
+    @DELETE("v1/entities/{id}/attachments/{attachmentId}")
+    suspend fun deleteAttachment(
+        @Path("id") id: String,
+        @Path("attachmentId") attachmentId: String,
+    )
+
+    // Ricerca prodotto da barcode (EAN/UPC)
+    @GET("v1/products/search-from-barcode")
+    suspend fun searchBarcode(@Query("data") data: String): List<BarcodeProductDto>
 
     // Statistiche
     @GET("v1/groups/statistics")

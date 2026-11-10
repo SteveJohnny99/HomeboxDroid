@@ -70,6 +70,49 @@ class HomeViewModel @Inject constructor(
     private val _tags = MutableStateFlow<List<Tag>>(emptyList())
     val tags: StateFlow<List<Tag>> = _tags.asStateFlow()
 
+    // Dialog "nuovo oggetto" e scanner barcode gestiti qui, per poter chiudere
+    // il dialog durante la scansione e riaprirlo precompilato.
+    private val _showCreateItem = MutableStateFlow(false)
+    val showCreateItem: StateFlow<Boolean> = _showCreateItem.asStateFlow()
+
+    private val _scannerForItem = MutableStateFlow(false)
+    val scannerForItem: StateFlow<Boolean> = _scannerForItem.asStateFlow()
+
+    /** Precompilazione da barcode, consumata all'apertura del dialog. */
+    @Volatile private var pendingPrefill: it.stevej.homeboxdroid.domain.BarcodeResult? = null
+    fun consumeItemPrefill(): it.stevej.homeboxdroid.domain.BarcodeResult? =
+        pendingPrefill.also { pendingPrefill = null }
+
+    fun openCreateItem() { pendingPrefill = null; _showCreateItem.value = true }
+    fun closeCreateItem() { _showCreateItem.value = false }
+
+    fun startItemBarcodeScan() {
+        _showCreateItem.value = false
+        _scannerForItem.value = true
+    }
+
+    fun cancelScan() {
+        _scannerForItem.value = false
+        _showCreateItem.value = true
+    }
+
+    fun onItemBarcode(code: String) {
+        _scannerForItem.value = false
+        viewModelScope.launch {
+            when (val r = repo.searchBarcode(code)) {
+                is ApiResult.Error -> _state.update { it.copy(message = r.message) }
+                is ApiResult.Success -> {
+                    if (r.data == null) {
+                        _state.update { it.copy(message = "Nessun prodotto trovato per questo codice.") }
+                    } else {
+                        pendingPrefill = r.data
+                    }
+                }
+            }
+            _showCreateItem.value = true
+        }
+    }
+
     // Emesso quando una creazione/modifica/eliminazione va a buon fine: le UI
     // (dialog) lo usano per chiudersi SOLO in caso di successo.
     private val _saveSuccess = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -217,6 +260,37 @@ class HomeViewModel @Inject constructor(
                     _state.update { it.copy(saving = false, message = "Eliminato.") }
                     closeDetail()
                     refresh()
+                }
+            }
+        }
+    }
+
+    // --- Allegati -----------------------------------------------------------
+
+    fun attachmentUrl(entityId: String, attachmentId: String): String =
+        repo.attachmentUrl(entityId, attachmentId)
+
+    fun uploadAttachment(entityId: String, bytes: ByteArray, filename: String, mime: String) {
+        _state.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            when (val r = repo.uploadAttachment(entityId, bytes, filename, mime, primary = false)) {
+                is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
+                is ApiResult.Success -> {
+                    _state.update { it.copy(saving = false, message = "Allegato caricato.") }
+                    openDetail(entityId) // ricarica il dettaglio con il nuovo allegato
+                }
+            }
+        }
+    }
+
+    fun deleteAttachment(entityId: String, attachmentId: String) {
+        _state.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            when (val r = repo.deleteAttachment(entityId, attachmentId)) {
+                is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
+                is ApiResult.Success -> {
+                    _state.update { it.copy(saving = false, message = "Allegato eliminato.") }
+                    openDetail(entityId)
                 }
             }
         }
