@@ -8,6 +8,12 @@ import it.stevej.homeboxdroid.data.remote.HomeboxApi
 import it.stevej.homeboxdroid.data.remote.LoginFormDto
 import it.stevej.homeboxdroid.data.remote.TagCreateDto
 import it.stevej.homeboxdroid.data.remote.TreeItemDto
+import it.stevej.homeboxdroid.data.cache.CacheDao
+import it.stevej.homeboxdroid.data.cache.DetailEntity
+import it.stevej.homeboxdroid.data.cache.NodeEntity
+import it.stevej.homeboxdroid.data.cache.StatsEntity
+import it.stevej.homeboxdroid.data.cache.TagEntity
+import it.stevej.homeboxdroid.data.cache.TypeEntity
 import it.stevej.homeboxdroid.domain.Attachment
 import it.stevej.homeboxdroid.domain.BarcodeResult
 import it.stevej.homeboxdroid.domain.EntityDetail
@@ -19,7 +25,11 @@ import it.stevej.homeboxdroid.domain.Statistics
 import it.stevej.homeboxdroid.domain.Tag
 import it.stevej.homeboxdroid.domain.UserInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -27,17 +37,25 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Unica fonte di verita' verso il server Homebox. Online-first in questa prima
- * versione; la cache Room arriva in M2. Gestisce auth (API Key o login),
- * browse ad albero e creazione di luoghi/oggetti.
+ * Unica fonte di verita' verso il server Homebox. Network-first con fallback
+ * alla cache Room per le letture (albero, dettaglio, tag, tipi, statistiche):
+ * se la rete non risponde, mostra gli ultimi dati noti e segnala lo stato
+ * offline. Le scritture richiedono ancora la rete (coda offline: blocco futuro).
  */
 @Singleton
 class HomeboxRepository @Inject constructor(
     private val api: HomeboxApi,
     private val settings: SecureSettings,
+    private val cache: CacheDao,
+    private val json: Json,
 ) {
     // Cache in memoria dei tipi entita' per risolvere location/item type.
     @Volatile private var cachedTypes: List<EntityType>? = null
+
+    // true quando l'ultima lettura ha usato la cache perche' la rete non
+    // rispondeva. La UI mostra un indicatore.
+    private val _offline = MutableStateFlow(false)
+    val offline: StateFlow<Boolean> = _offline.asStateFlow()
 
     // --- Auth ---------------------------------------------------------------
 
@@ -117,6 +135,8 @@ class HomeboxRepository @Inject constructor(
             runCatching { api.logout() }
         }
         cachedTypes = null
+        _offline.value = false
+        runCatching { cache.clearAll() }
         settings.clearSession()
     }
 
@@ -138,26 +158,61 @@ class HomeboxRepository @Inject constructor(
 
     // --- Browse -------------------------------------------------------------
 
+    /** Un errore di sola connettivita' (timeout/host irraggiungibile) ha code null. */
+    private fun isConnectivity(err: ApiResult.Error): Boolean = err.code == null
+
     suspend fun tree(withItems: Boolean = true): ApiResult<List<EntityNode>> =
         withContext(Dispatchers.IO) {
             when (val r = safeApiCall { api.tree(withItems) }) {
-                is ApiResult.Error -> ApiResult.Error(r.message, r.code)
-                is ApiResult.Success -> ApiResult.Success(r.data.map { it.toNode() })
+                is ApiResult.Success -> {
+                    cache.replaceNodes(flattenForCache(r.data))
+                    _offline.value = false
+                    ApiResult.Success(r.data.map { it.toNode() })
+                }
+                is ApiResult.Error -> {
+                    if (isConnectivity(r)) {
+                        val cached = cache.allNodes()
+                        if (cached.isNotEmpty()) {
+                            _offline.value = true
+                            return@withContext ApiResult.Success(rebuildTree(cached))
+                        }
+                    }
+                    ApiResult.Error(r.message, r.code)
+                }
             }
         }
 
     suspend fun entity(id: String): ApiResult<EntityDetail> = withContext(Dispatchers.IO) {
         when (val r = safeApiCall { api.entity(id) }) {
-            is ApiResult.Error -> ApiResult.Error(r.message, r.code)
-            is ApiResult.Success -> ApiResult.Success(r.data.toDetail())
+            is ApiResult.Success -> {
+                runCatching {
+                    cache.putDetail(DetailEntity(id, json.encodeToString(EntityOutDto.serializer(), r.data)))
+                }
+                _offline.value = false
+                ApiResult.Success(r.data.toDetail())
+            }
+            is ApiResult.Error -> {
+                if (isConnectivity(r)) {
+                    val cachedJson = cache.detailJson(id)
+                    if (cachedJson != null) {
+                        val dto = runCatching {
+                            json.decodeFromString(EntityOutDto.serializer(), cachedJson)
+                        }.getOrNull()
+                        if (dto != null) {
+                            _offline.value = true
+                            return@withContext ApiResult.Success(dto.toDetail())
+                        }
+                    }
+                }
+                ApiResult.Error(r.message, r.code)
+            }
         }
     }
 
     suspend fun statistics(): ApiResult<Statistics> = withContext(Dispatchers.IO) {
         when (val r = safeApiCall { api.statistics() }) {
-            is ApiResult.Error -> ApiResult.Error(r.message, r.code)
-            is ApiResult.Success -> ApiResult.Success(
-                Statistics(
+            is ApiResult.Success -> {
+                val stats = Statistics(
                     totalItems = r.data.totalItems ?: 0,
                     totalLocations = r.data.totalLocations ?: 0,
                     totalTags = r.data.totalTags ?: 0,
@@ -165,7 +220,23 @@ class HomeboxRepository @Inject constructor(
                     totalItemPrice = r.data.totalItemPrice ?: 0.0,
                     totalWithWarranty = r.data.totalWithWarranty ?: 0,
                 )
-            )
+                cache.putStats(
+                    StatsEntity(0, stats.totalItems, stats.totalLocations, stats.totalTags,
+                        stats.totalUsers, stats.totalItemPrice, stats.totalWithWarranty)
+                )
+                ApiResult.Success(stats)
+            }
+            is ApiResult.Error -> {
+                if (isConnectivity(r)) {
+                    cache.stats()?.let {
+                        return@withContext ApiResult.Success(
+                            Statistics(it.totalItems, it.totalLocations, it.totalTags,
+                                it.totalUsers, it.totalItemPrice, it.totalWithWarranty)
+                        )
+                    }
+                }
+                ApiResult.Error(r.message, r.code)
+            }
         }
     }
 
@@ -173,13 +244,23 @@ class HomeboxRepository @Inject constructor(
 
     suspend fun tags(): ApiResult<List<Tag>> = withContext(Dispatchers.IO) {
         when (val r = safeApiCall { api.tags() }) {
-            is ApiResult.Error -> ApiResult.Error(r.message, r.code)
-            is ApiResult.Success -> ApiResult.Success(
-                r.data.mapNotNull { t ->
+            is ApiResult.Success -> {
+                val tags = r.data.mapNotNull { t ->
                     val id = t.id ?: return@mapNotNull null
                     Tag(id = id, name = t.name ?: "(tag)", color = t.color)
                 }
-            )
+                cache.replaceTags(tags.map { TagEntity(it.id, it.name, it.color) })
+                ApiResult.Success(tags)
+            }
+            is ApiResult.Error -> {
+                if (isConnectivity(r)) {
+                    val cached = cache.allTags()
+                    if (cached.isNotEmpty()) {
+                        return@withContext ApiResult.Success(cached.map { Tag(it.id, it.name, it.color) })
+                    }
+                }
+                ApiResult.Error(r.message, r.code)
+            }
         }
     }
 
@@ -198,11 +279,22 @@ class HomeboxRepository @Inject constructor(
         withContext(Dispatchers.IO) {
             cachedTypes?.let { if (!force) return@withContext ApiResult.Success(it) }
             when (val r = safeApiCall { api.entityTypes() }) {
-                is ApiResult.Error -> ApiResult.Error(r.message, r.code)
                 is ApiResult.Success -> {
                     val mapped = r.data.map { it.toType() }
                     cachedTypes = mapped
+                    cache.replaceTypes(mapped.map { TypeEntity(it.id, it.name, it.isLocation, it.icon) })
                     ApiResult.Success(mapped)
+                }
+                is ApiResult.Error -> {
+                    if (isConnectivity(r)) {
+                        val cached = cache.allTypes()
+                        if (cached.isNotEmpty()) {
+                            val mapped = cached.map { EntityType(it.id, it.name, it.isLocation, it.icon) }
+                            cachedTypes = mapped
+                            return@withContext ApiResult.Success(mapped)
+                        }
+                    }
+                    ApiResult.Error(r.message, r.code)
                 }
             }
         }
@@ -461,16 +553,50 @@ class HomeboxRepository @Inject constructor(
             }
         }
 
+    // --- Cache albero -------------------------------------------------------
+
+    private fun nodeTypeOf(dto: TreeItemDto): NodeType = when (dto.type?.lowercase()) {
+        "location" -> NodeType.LOCATION
+        "item" -> NodeType.ITEM
+        else -> if (!dto.children.isNullOrEmpty()) NodeType.LOCATION else NodeType.OTHER
+    }
+
+    /** Appiattisce l'albero in righe (DFS), position = ordine di visita. */
+    private fun flattenForCache(items: List<TreeItemDto>): List<NodeEntity> {
+        val out = mutableListOf<NodeEntity>()
+        fun walk(list: List<TreeItemDto>, parentId: String?) {
+            for (it in list) {
+                val nid = it.id.orEmpty()
+                if (nid.isEmpty()) continue
+                out += NodeEntity(nid, it.name ?: "(senza nome)", nodeTypeOf(it).name, parentId, out.size)
+                it.children?.let { c -> walk(c, nid) }
+            }
+        }
+        walk(items, null)
+        return out
+    }
+
+    /** Ricostruisce l'albero dalle righe in cache. */
+    private fun rebuildTree(rows: List<NodeEntity>): List<EntityNode> {
+        val byParent = rows.sortedBy { it.position }.groupBy { it.parentId }
+        fun build(parentId: String?): List<EntityNode> =
+            (byParent[parentId] ?: emptyList()).map { n ->
+                EntityNode(
+                    id = n.id,
+                    name = n.name,
+                    type = runCatching { NodeType.valueOf(n.type) }.getOrDefault(NodeType.OTHER),
+                    children = build(n.id),
+                )
+            }
+        return build(null)
+    }
+
     // --- Mapping ------------------------------------------------------------
 
     private fun TreeItemDto.toNode(): EntityNode = EntityNode(
         id = id.orEmpty(),
         name = name ?: "(senza nome)",
-        type = when (type?.lowercase()) {
-            "location" -> NodeType.LOCATION
-            "item" -> NodeType.ITEM
-            else -> if (!children.isNullOrEmpty()) NodeType.LOCATION else NodeType.OTHER
-        },
+        type = nodeTypeOf(this),
         children = children?.map { it.toNode() } ?: emptyList(),
     )
 

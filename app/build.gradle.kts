@@ -15,8 +15,8 @@ android {
         applicationId = "it.stevej.homeboxdroid"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.6.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -96,10 +96,10 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.security.crypto)
 
-    // Cache locale: runtime pronto, il compiler Room si abilita in M2
+    // Cache locale (Room)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
-    // ksp(libs.androidx.room.compiler) // abilitare quando si definisce il DB (M2)
+    ksp(libs.androidx.room.compiler)
 
     // Immagini (pronto per M2)
     implementation(libs.coil.compose)

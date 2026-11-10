@@ -1,9 +1,12 @@
 package it.stevej.homeboxdroid.di
 
 import android.content.Context
+import androidx.room.Room
 import coil.ImageLoader
 import coil.disk.DiskCache
 import dagger.hilt.android.qualifiers.ApplicationContext
+import it.stevej.homeboxdroid.data.cache.CacheDao
+import it.stevej.homeboxdroid.data.cache.HomeboxDatabase
 import it.stevej.homeboxdroid.data.SecureSettings
 import it.stevej.homeboxdroid.data.remote.AuthInterceptor
 import it.stevej.homeboxdroid.data.remote.BaseUrlInterceptor
@@ -80,6 +83,17 @@ object AppModule {
     @Provides
     @Singleton
     fun provideApi(retrofit: Retrofit): HomeboxApi = retrofit.create(HomeboxApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideDatabase(@ApplicationContext context: Context): HomeboxDatabase =
+        Room.databaseBuilder(context, HomeboxDatabase::class.java, "homebox-cache.db")
+            .fallbackToDestructiveMigration()
+            .build()
+
+    @Provides
+    @Singleton
+    fun provideCacheDao(db: HomeboxDatabase): CacheDao = db.cacheDao()
 
     /**
      * ImageLoader di Coil per gli allegati: client dedicato con auth e TLS ma

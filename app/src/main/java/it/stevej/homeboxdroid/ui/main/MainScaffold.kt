@@ -124,14 +124,31 @@ fun MainScaffold(viewModel: HomeViewModel = hiltViewModel()) {
             },
             snackbarHost = { SnackbarHost(snackbar) },
         ) { inner ->
-            when (tab) {
-                MainTab.BROWSE -> BrowseScreen(viewModel, Modifier.padding(inner))
-                MainTab.SEARCH -> it.stevej.homeboxdroid.ui.search.SearchScreen(
-                    homeViewModel = viewModel,
-                    modifier = Modifier.padding(inner),
-                )
-                MainTab.STATS -> StatsScreen(viewModel, Modifier.padding(inner))
-                MainTab.SETTINGS -> SettingsScreen(Modifier.padding(inner))
+            val offline by viewModel.offline.collectAsState()
+            Column(Modifier.padding(inner).fillMaxSize()) {
+                if (offline) {
+                    androidx.compose.material3.Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            "Offline — mostrati gli ultimi dati salvati",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+                androidx.compose.foundation.layout.Box(Modifier.weight(1f).fillMaxWidth()) {
+                    when (tab) {
+                        MainTab.BROWSE -> BrowseScreen(viewModel)
+                        MainTab.SEARCH -> it.stevej.homeboxdroid.ui.search.SearchScreen(
+                            homeViewModel = viewModel,
+                        )
+                        MainTab.STATS -> StatsScreen(viewModel)
+                        MainTab.SETTINGS -> SettingsScreen()
+                    }
+                }
             }
         }
     }

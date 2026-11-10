@@ -70,6 +70,9 @@ class HomeViewModel @Inject constructor(
     private val _tags = MutableStateFlow<List<Tag>>(emptyList())
     val tags: StateFlow<List<Tag>> = _tags.asStateFlow()
 
+    /** true quando i dati mostrati vengono dalla cache (rete non raggiungibile). */
+    val offline: StateFlow<Boolean> = repo.offline
+
     // Dialog "nuovo oggetto" e scanner barcode gestiti qui, per poter chiudere
     // il dialog durante la scansione e riaprirlo precompilato.
     private val _showCreateItem = MutableStateFlow(false)
