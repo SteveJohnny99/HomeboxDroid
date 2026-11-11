@@ -11,6 +11,7 @@ import it.stevej.homeboxdroid.data.remote.TreeItemDto
 import it.stevej.homeboxdroid.data.cache.CacheDao
 import it.stevej.homeboxdroid.data.cache.DetailEntity
 import it.stevej.homeboxdroid.data.cache.NodeEntity
+import it.stevej.homeboxdroid.data.cache.PendingOpEntity
 import it.stevej.homeboxdroid.data.cache.StatsEntity
 import it.stevej.homeboxdroid.data.cache.TagEntity
 import it.stevej.homeboxdroid.data.cache.TypeEntity
