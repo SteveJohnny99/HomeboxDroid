@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -72,6 +73,29 @@ class HomeViewModel @Inject constructor(
 
     /** true quando i dati mostrati vengono dalla cache (rete non raggiungibile). */
     val offline: StateFlow<Boolean> = repo.offline
+
+    /** Numero di scritture in coda (offline) da sincronizzare. */
+    val pendingCount: StateFlow<Int> = repo.pendingCountFlow()
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, 0)
+
+    /**
+     * Gestione comune dell'esito di una scrittura.
+     * Ritorna true se eseguita o messa in coda (chiude il dialog), false su errore.
+     */
+    private fun handleWrite(
+        r: HomeboxRepository.WriteResult,
+        doneMsg: String,
+    ): Boolean = when (r) {
+        is HomeboxRepository.WriteResult.Done -> {
+            _state.update { it.copy(saving = false, message = doneMsg) }; true
+        }
+        is HomeboxRepository.WriteResult.Queued -> {
+            _state.update { it.copy(saving = false, message = "$doneMsg (in coda, offline)") }; true
+        }
+        is HomeboxRepository.WriteResult.Error -> {
+            _state.update { it.copy(saving = false, message = r.message) }; false
+        }
+    }
 
     // Dialog "nuovo oggetto" e scanner barcode gestiti qui, per poter chiudere
     // il dialog durante la scansione e riaprirlo precompilato.
@@ -131,6 +155,8 @@ class HomeViewModel @Inject constructor(
     fun refresh() {
         _state.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
+            // Prova a sincronizzare la coda prima di ricaricare (best-effort).
+            if (repo.pendingCount() > 0) repo.syncPending()
             when (val r = repo.tree(withItems = true)) {
                 is ApiResult.Error -> _state.update { it.copy(loading = false, error = r.message) }
                 is ApiResult.Success -> _state.update {
@@ -141,6 +167,13 @@ class HomeViewModel @Inject constructor(
             }
             loadStats()
             loadTags()
+        }
+    }
+
+    fun syncNow() {
+        viewModelScope.launch {
+            repo.syncPending()
+            refresh()
         }
     }
 
@@ -204,13 +237,9 @@ class HomeViewModel @Inject constructor(
         _state.update { it.copy(saving = true) }
         viewModelScope.launch {
             val parent = _state.value.currentLocationId
-            when (val r = repo.createLocation(name, description, parent)) {
-                is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
-                is ApiResult.Success -> {
-                    _state.update { it.copy(saving = false, message = "Luogo creato.") }
-                    _saveSuccess.tryEmit(Unit)
-                    refresh()
-                }
+            if (handleWrite(repo.createLocation(name, description, parent), "Luogo creato.")) {
+                _saveSuccess.tryEmit(Unit)
+                refresh()
             }
         }
     }
@@ -227,13 +256,13 @@ class HomeViewModel @Inject constructor(
         if (name.isBlank()) return
         _state.update { it.copy(saving = true) }
         viewModelScope.launch {
-            when (val r = repo.createItem(name, quantity, description, manufacturer, modelNumber, locationId, tagIds)) {
-                is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
-                is ApiResult.Success -> {
-                    _state.update { it.copy(saving = false, message = "Oggetto creato.") }
-                    _saveSuccess.tryEmit(Unit)
-                    refresh()
-                }
+            if (handleWrite(
+                    repo.createItem(name, quantity, description, manufacturer, modelNumber, locationId, tagIds),
+                    "Oggetto creato.",
+                )
+            ) {
+                _saveSuccess.tryEmit(Unit)
+                refresh()
             }
         }
     }
@@ -242,14 +271,10 @@ class HomeViewModel @Inject constructor(
         if (edit.name.isBlank()) return
         _state.update { it.copy(saving = true) }
         viewModelScope.launch {
-            when (val r = repo.updateEntity(id, edit)) {
-                is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
-                is ApiResult.Success -> {
-                    _state.update { it.copy(saving = false, message = "Modifiche salvate.") }
-                    _saveSuccess.tryEmit(Unit)
-                    closeDetail()
-                    refresh()
-                }
+            if (handleWrite(repo.updateEntity(id, edit), "Modifiche salvate.")) {
+                _saveSuccess.tryEmit(Unit)
+                closeDetail()
+                refresh()
             }
         }
     }
@@ -257,13 +282,9 @@ class HomeViewModel @Inject constructor(
     fun deleteEntity(id: String) {
         _state.update { it.copy(saving = true) }
         viewModelScope.launch {
-            when (val r = repo.deleteEntity(id)) {
-                is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
-                is ApiResult.Success -> {
-                    _state.update { it.copy(saving = false, message = "Eliminato.") }
-                    closeDetail()
-                    refresh()
-                }
+            if (handleWrite(repo.deleteEntity(id), "Eliminato.")) {
+                closeDetail()
+                refresh()
             }
         }
     }
@@ -276,12 +297,8 @@ class HomeViewModel @Inject constructor(
     fun uploadAttachment(entityId: String, bytes: ByteArray, filename: String, mime: String) {
         _state.update { it.copy(saving = true) }
         viewModelScope.launch {
-            when (val r = repo.uploadAttachment(entityId, bytes, filename, mime, primary = false)) {
-                is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
-                is ApiResult.Success -> {
-                    _state.update { it.copy(saving = false, message = "Allegato caricato.") }
-                    openDetail(entityId) // ricarica il dettaglio con il nuovo allegato
-                }
+            if (handleWrite(repo.uploadAttachment(entityId, bytes, filename, mime, primary = false), "Allegato caricato.")) {
+                openDetail(entityId) // ricarica il dettaglio con il nuovo allegato
             }
         }
     }

@@ -72,6 +72,32 @@ fun SettingsScreen(modifier: Modifier = Modifier, viewModel: SettingsViewModel =
             }
         }
 
+        val pending by viewModel.pendingCount.collectAsState()
+        if (pending > 0) {
+            InfoCard {
+                Text("Coda offline", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "$pending operazioni in attesa di sincronizzazione.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = viewModel::syncNow,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Sincronizza ora") }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = viewModel::clearQueue,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Svuota coda (annulla operazioni)") }
+            }
+        }
+
         InfoCard {
             Text("Sessione", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))

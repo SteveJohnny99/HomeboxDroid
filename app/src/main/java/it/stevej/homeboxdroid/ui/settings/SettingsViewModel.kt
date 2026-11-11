@@ -9,6 +9,7 @@ import it.stevej.homeboxdroid.data.SecureSettings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -53,5 +54,26 @@ class SettingsViewModel @Inject constructor(
 
     fun logout() {
         viewModelScope.launch { repo.logout() }
+    }
+
+    val pendingCount: StateFlow<Int> = repo.pendingCountFlow()
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, 0)
+
+    fun syncNow() {
+        _state.update { it.copy(testResult = "Sincronizzazione in corso...") }
+        viewModelScope.launch {
+            repo.syncPending()
+            val left = repo.pendingCount()
+            _state.update {
+                it.copy(testResult = if (left == 0) "Coda sincronizzata." else "Ancora $left in coda (controlla la rete).")
+            }
+        }
+    }
+
+    fun clearQueue() {
+        viewModelScope.launch {
+            repo.clearPendingQueue()
+            _state.update { it.copy(testResult = "Coda svuotata.") }
+        }
     }
 }

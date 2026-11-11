@@ -10,8 +10,9 @@ import androidx.room.RoomDatabase
         TagEntity::class,
         TypeEntity::class,
         StatsEntity::class,
+        PendingOpEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class HomeboxDatabase : RoomDatabase() {

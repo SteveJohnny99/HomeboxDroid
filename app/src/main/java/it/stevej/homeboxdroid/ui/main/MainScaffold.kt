@@ -125,6 +125,7 @@ fun MainScaffold(viewModel: HomeViewModel = hiltViewModel()) {
             snackbarHost = { SnackbarHost(snackbar) },
         ) { inner ->
             val offline by viewModel.offline.collectAsState()
+            val pending by viewModel.pendingCount.collectAsState()
             Column(Modifier.padding(inner).fillMaxSize()) {
                 if (offline) {
                     androidx.compose.material3.Surface(
@@ -135,6 +136,20 @@ fun MainScaffold(viewModel: HomeViewModel = hiltViewModel()) {
                             "Offline — mostrati gli ultimi dati salvati",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+                if (pending > 0) {
+                    androidx.compose.material3.Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { viewModel.syncNow() },
+                    ) {
+                        Text(
+                            "$pending in attesa di sincronizzazione — tocca per sincronizzare",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         )
                     }

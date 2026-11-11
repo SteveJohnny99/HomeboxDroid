@@ -46,3 +46,17 @@ data class StatsEntity(
     val totalItemPrice: Double,
     val totalWithWarranty: Int,
 )
+
+/**
+ * Operazione di scrittura in coda (offline). payload e' JSON specifico del tipo.
+ * tempId valorizzato per i CREATE (id locale provvisorio tmp_...).
+ */
+@Entity(tableName = "pending_ops")
+data class PendingOpEntity(
+    @PrimaryKey(autoGenerate = true) val seq: Long = 0,
+    val type: String,
+    val payload: String,
+    val tempId: String?,
+    val createdAt: Long,
+    val lastError: String?,
+)
