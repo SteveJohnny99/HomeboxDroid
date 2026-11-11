@@ -155,6 +155,25 @@ data class EntityFieldDataDto(
 )
 
 @Serializable
+data class MaintenanceEntryDto(
+    val id: String? = null,
+    val name: String? = null,
+    val description: String? = null,
+    val cost: String? = null,
+    val scheduledDate: String? = null,
+    val completedDate: String? = null,
+)
+
+@Serializable
+data class MaintenanceEntryCreateDto(
+    val name: String,
+    val description: String? = null,
+    val cost: String? = null,
+    val scheduledDate: String? = null,
+    val completedDate: String? = null,
+)
+
+@Serializable
 data class EntityUpdateDto(
     val id: String,
     val name: String,

@@ -96,6 +96,12 @@ private fun DetailContent(viewModel: HomeViewModel, entity: EntityDetail) {
         enabled = !state.saving,
     )
 
+    // Manutenzione solo per gli oggetti (non per i luoghi).
+    if (!entity.isLocation) {
+        Spacer(Modifier.height(20.dp))
+        MaintenanceSection(viewModel, entity.id)
+    }
+
     Spacer(Modifier.height(20.dp))
     Row(modifier = Modifier.fillMaxWidth()) {
         OutlinedButton(
@@ -193,6 +199,7 @@ private fun DetailBody(e: EntityDetail) {
     DetailField("Descrizione", e.description)
     DetailField("Note", e.notes)
     if (e.tags.isNotEmpty()) DetailField("Tag", e.tags.joinToString(", "))
+    e.customFields.forEach { f -> DetailField(f.name, customFieldValue(f)) }
 }
 
 @Composable
@@ -434,6 +441,7 @@ private fun EditEntityDialog(viewModel: HomeViewModel, entity: EntityDetail, onC
     val isLocation = entity.isLocation
     val tags by viewModel.tags.collectAsState()
     var selectedTags by remember(entity.id) { mutableStateOf(entity.tagIds.toSet()) }
+    var customFields by remember(entity.id) { mutableStateOf(entity.customFields) }
 
     // Chiudi la scheda SOLO quando il salvataggio va a buon fine: su errore
     // resta aperta con tutte le modifiche.
@@ -570,6 +578,8 @@ private fun EditEntityDialog(viewModel: HomeViewModel, entity: EntityDetail, onC
                         },
                         onCreate = { nm -> viewModel.createTag(nm) { t -> selectedTags = selectedTags + t.id } },
                     )
+                    Spacer(Modifier.height(12.dp))
+                    CustomFieldsEditor(fields = customFields, onChange = { customFields = it })
                     Spacer(Modifier.height(8.dp))
                 }
 
@@ -601,6 +611,7 @@ private fun EditEntityDialog(viewModel: HomeViewModel, entity: EntityDetail, onC
                         locationId = if (isLocation) null else selectedId,
                         parentId = selectedId,
                         tagIds = if (isLocation) emptyList() else selectedTags.toList(),
+                        customFields = if (isLocation) null else customFields,
                     )
                     viewModel.updateEntity(entity.id, edit)
                     // La chiusura avviene su saveSuccess: su errore la scheda resta.

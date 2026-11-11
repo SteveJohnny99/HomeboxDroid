@@ -48,6 +48,7 @@ data class EntityDetail(
     val locationId: String?,
     val parentId: String?,
     val attachments: List<Attachment>,
+    val customFields: List<CustomField>,
 )
 
 /** Statistiche di gruppo per la dashboard. */
@@ -97,6 +98,26 @@ data class BarcodeResult(
     val manufacturer: String?,
     val modelNumber: String?,
     val notes: String?,
+)
+
+/** Voce di manutenzione di un oggetto. */
+data class MaintenanceEntry(
+    val id: String,
+    val name: String,
+    val description: String?,
+    val cost: String?,
+    val scheduledDate: String?,
+    val completedDate: String?,
+)
+
+/** Campo personalizzato (text/number/boolean/time). */
+data class CustomField(
+    val id: String?,
+    val name: String,
+    val type: String,
+    val textValue: String?,
+    val numberValue: Int?,
+    val booleanValue: Boolean?,
 )
 
 /** Risultato di ricerca (entita' in forma compatta). */

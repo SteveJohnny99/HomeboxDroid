@@ -6,6 +6,8 @@ import it.stevej.homeboxdroid.data.remote.EntityTypeSummaryDto
 import it.stevej.homeboxdroid.data.remote.EntityUpdateDto
 import it.stevej.homeboxdroid.data.remote.HomeboxApi
 import it.stevej.homeboxdroid.data.remote.LoginFormDto
+import it.stevej.homeboxdroid.data.remote.EntityFieldDataDto
+import it.stevej.homeboxdroid.data.remote.MaintenanceEntryCreateDto
 import it.stevej.homeboxdroid.data.remote.TagCreateDto
 import it.stevej.homeboxdroid.data.remote.TreeItemDto
 import it.stevej.homeboxdroid.data.cache.CacheDao
@@ -17,7 +19,9 @@ import it.stevej.homeboxdroid.data.cache.TagEntity
 import it.stevej.homeboxdroid.data.cache.TypeEntity
 import it.stevej.homeboxdroid.domain.Attachment
 import it.stevej.homeboxdroid.domain.BarcodeResult
+import it.stevej.homeboxdroid.domain.CustomField
 import it.stevej.homeboxdroid.domain.EntityDetail
+import it.stevej.homeboxdroid.domain.MaintenanceEntry
 import it.stevej.homeboxdroid.domain.EntityNode
 import it.stevej.homeboxdroid.domain.EntityType
 import it.stevej.homeboxdroid.domain.LocationRef
@@ -349,6 +353,8 @@ class HomeboxRepository @Inject constructor(
         val locationId: String?,
         val parentId: String?,
         val tagIds: List<String>,
+        // null = mantieni i campi personalizzati attuali; valorizzato = sostituisci.
+        val customFields: List<CustomField>? = null,
     )
 
     suspend fun createLocation(name: String, description: String?, parentId: String?): WriteResult =
@@ -440,6 +446,9 @@ class HomeboxRepository @Inject constructor(
             id, edit.name.trim(), edit.description, edit.notes, edit.quantity, edit.manufacturer,
             edit.modelNumber, edit.serialNumber, edit.purchasePrice, edit.purchaseDate, edit.purchaseFrom,
             edit.warrantyExpires, edit.lifetimeWarranty, edit.locationId, edit.parentId, edit.tagIds,
+            edit.customFields?.map {
+                EntityFieldDataDto(it.id, it.name, it.type, it.textValue, it.numberValue, it.booleanValue)
+            },
         )
         cache.insertPending(
             PendingOpEntity(
@@ -518,7 +527,12 @@ class HomeboxRepository @Inject constructor(
             soldTo = current.soldTo,
             soldNotes = current.soldNotes,
             tagIds = edit.tagIds,
-            fields = current.fields,
+            fields = edit.customFields?.map {
+                EntityFieldDataDto(
+                    id = it.id, name = it.name, type = it.type,
+                    textValue = it.textValue, numberValue = it.numberValue, booleanValue = it.booleanValue,
+                )
+            } ?: current.fields,
         )
         return when (val r = safeApiCall { api.updateEntity(id, body) }) {
             is ApiResult.Error -> ApiResult.Error(r.message, r.code)
@@ -622,6 +636,9 @@ class HomeboxRepository @Inject constructor(
                             p.name, p.description, p.notes, p.quantity, p.manufacturer, p.modelNumber,
                             p.serialNumber, p.purchasePrice, p.purchaseDate, p.purchaseFrom, p.warrantyExpires,
                             p.lifetimeWarranty, p.locationId, p.parentId, p.tagIds,
+                            p.customFields?.map {
+                                CustomField(it.id, it.name ?: "", it.type ?: "text", it.textValue, it.numberValue, it.booleanValue)
+                            },
                         ),
                     )
                 }
@@ -732,6 +749,57 @@ class HomeboxRepository @Inject constructor(
     suspend fun deleteAttachment(entityId: String, attachmentId: String): ApiResult<Unit> =
         withContext(Dispatchers.IO) {
             when (val r = safeApiCall { api.deleteAttachment(entityId, attachmentId) }) {
+                is ApiResult.Error -> ApiResult.Error(r.message, r.code)
+                is ApiResult.Success -> ApiResult.Success(Unit)
+            }
+        }
+
+    // --- Manutenzione (online) ----------------------------------------------
+
+    suspend fun maintenance(entityId: String): ApiResult<List<MaintenanceEntry>> =
+        withContext(Dispatchers.IO) {
+            when (val r = safeApiCall { api.maintenance(entityId) }) {
+                is ApiResult.Error -> ApiResult.Error(r.message, r.code)
+                is ApiResult.Success -> ApiResult.Success(
+                    r.data.mapNotNull { m ->
+                        val id = m.id ?: return@mapNotNull null
+                        MaintenanceEntry(
+                            id = id,
+                            name = m.name ?: "(voce)",
+                            description = m.description?.ifBlank { null },
+                            cost = m.cost?.takeIf { it.isNotBlank() && it != "0" },
+                            scheduledDate = m.scheduledDate?.ifBlank { null }?.take(10),
+                            completedDate = m.completedDate?.ifBlank { null }?.take(10),
+                        )
+                    }
+                )
+            }
+        }
+
+    suspend fun createMaintenance(
+        entityId: String,
+        name: String,
+        description: String?,
+        cost: String?,
+        scheduledDate: String?,
+        completedDate: String?,
+    ): ApiResult<Unit> = withContext(Dispatchers.IO) {
+        val body = MaintenanceEntryCreateDto(
+            name = name.trim(),
+            description = description?.trim()?.ifBlank { null },
+            cost = cost?.trim()?.replace(',', '.')?.ifBlank { null },
+            scheduledDate = toRfc3339(scheduledDate),
+            completedDate = toRfc3339(completedDate),
+        )
+        when (val r = safeApiCall { api.createMaintenance(entityId, body) }) {
+            is ApiResult.Error -> ApiResult.Error(r.message, r.code)
+            is ApiResult.Success -> ApiResult.Success(Unit)
+        }
+    }
+
+    suspend fun deleteMaintenance(maintenanceId: String): ApiResult<Unit> =
+        withContext(Dispatchers.IO) {
+            when (val r = safeApiCall { api.deleteMaintenance(maintenanceId) }) {
                 is ApiResult.Error -> ApiResult.Error(r.message, r.code)
                 is ApiResult.Success -> ApiResult.Success(Unit)
             }
@@ -895,6 +963,17 @@ class HomeboxRepository @Inject constructor(
                 primary = a.primary ?: false,
             )
         }?.sortedByDescending { it.primary } ?: emptyList(),
+        customFields = fields?.mapNotNull { f ->
+            val nm = f.name ?: return@mapNotNull null
+            CustomField(
+                id = f.id,
+                name = nm,
+                type = f.type ?: "text",
+                textValue = f.textValue,
+                numberValue = f.numberValue,
+                booleanValue = f.booleanValue,
+            )
+        } ?: emptyList(),
     )
 
     // --- Util ---------------------------------------------------------------

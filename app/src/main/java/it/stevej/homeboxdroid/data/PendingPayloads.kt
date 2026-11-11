@@ -1,5 +1,6 @@
 package it.stevej.homeboxdroid.data
 
+import it.stevej.homeboxdroid.data.remote.EntityFieldDataDto
 import kotlinx.serialization.Serializable
 
 /** Tipi di operazione in coda. */
@@ -49,6 +50,7 @@ data class UpdatePayload(
     val locationId: String?,
     val parentId: String?,
     val tagIds: List<String>,
+    val customFields: List<EntityFieldDataDto>? = null,
 )
 
 @Serializable

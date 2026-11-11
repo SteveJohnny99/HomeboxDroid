@@ -218,15 +218,63 @@ class HomeViewModel @Inject constructor(
 
     fun openDetail(id: String) {
         _detail.value = DetailState.Loading
+        _maintenance.value = emptyList()
         viewModelScope.launch {
             when (val r = repo.entity(id)) {
                 is ApiResult.Error -> _detail.value = DetailState.Error(r.message)
-                is ApiResult.Success -> _detail.value = DetailState.Ready(r.data)
+                is ApiResult.Success -> {
+                    _detail.value = DetailState.Ready(r.data)
+                    if (!r.data.isLocation && !id.startsWith("tmp_")) loadMaintenance(id)
+                }
             }
         }
     }
 
-    fun closeDetail() { _detail.value = DetailState.Hidden }
+    fun closeDetail() { _detail.value = DetailState.Hidden; _maintenance.value = emptyList() }
+
+    // --- Manutenzione -------------------------------------------------------
+
+    private val _maintenance = MutableStateFlow<List<it.stevej.homeboxdroid.domain.MaintenanceEntry>>(emptyList())
+    val maintenance: StateFlow<List<it.stevej.homeboxdroid.domain.MaintenanceEntry>> = _maintenance.asStateFlow()
+
+    private fun loadMaintenance(id: String) {
+        viewModelScope.launch {
+            when (val r = repo.maintenance(id)) {
+                is ApiResult.Success -> _maintenance.value = r.data
+                is ApiResult.Error -> Unit // manutenzione non disponibile offline: lista vuota
+            }
+        }
+    }
+
+    fun addMaintenance(
+        entityId: String, name: String, description: String?, cost: String?,
+        scheduledDate: String?, completedDate: String?,
+    ) {
+        if (name.isBlank()) return
+        _state.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            when (val r = repo.createMaintenance(entityId, name, description, cost, scheduledDate, completedDate)) {
+                is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
+                is ApiResult.Success -> {
+                    _state.update { it.copy(saving = false, message = "Voce di manutenzione aggiunta.") }
+                    loadMaintenance(entityId)
+                }
+            }
+        }
+    }
+
+    fun deleteMaintenance(maintenanceId: String, entityId: String) {
+        _state.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            when (val r = repo.deleteMaintenance(maintenanceId)) {
+                is ApiResult.Error -> _state.update { it.copy(saving = false, message = r.message) }
+                is ApiResult.Success -> {
+                    _state.update { it.copy(saving = false, message = "Voce eliminata.") }
+                    loadMaintenance(entityId)
+                }
+            }
+        }
+    }
 
     fun goToCrumb(index: Int) {
         _state.update { it.copy(crumbs = it.crumbs.take(index + 1)) }

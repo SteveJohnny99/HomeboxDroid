@@ -93,6 +93,19 @@ interface HomeboxApi {
         @Path("attachmentId") attachmentId: String,
     )
 
+    // Manutenzione
+    @GET("v1/entities/{id}/maintenance")
+    suspend fun maintenance(@Path("id") id: String): List<MaintenanceEntryDto>
+
+    @POST("v1/entities/{id}/maintenance")
+    suspend fun createMaintenance(
+        @Path("id") id: String,
+        @Body body: MaintenanceEntryCreateDto,
+    ): MaintenanceEntryDto
+
+    @DELETE("v1/maintenance/{maintenanceId}")
+    suspend fun deleteMaintenance(@Path("maintenanceId") maintenanceId: String)
+
     // Ricerca prodotto da barcode (EAN/UPC).
     // NB: il backend decodifica il parametro come "productEAN" (lo swagger dice
     // erroneamente "data"); con "data" il server va in errore. 204 = nessun
