@@ -114,6 +114,9 @@ interface CacheDao {
     @Query("UPDATE nodes SET name = :name WHERE id = :id")
     suspend fun renameNode(id: String, name: String)
 
+    @Query("UPDATE nodes SET quantity = :quantity WHERE id = :id")
+    suspend fun updateNodeQuantity(id: String, quantity: Double)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertNode(node: NodeEntity)
 

@@ -11,6 +11,9 @@ data class NodeEntity(
     val type: String,
     val parentId: String?,
     val position: Int,
+    val quantity: Double? = null,
+    val price: Double? = null,
+    val createdAt: String? = null,
 )
 
 /** Dettaglio entita' serializzato (EntityOutDto come JSON) per il dettaglio offline. */

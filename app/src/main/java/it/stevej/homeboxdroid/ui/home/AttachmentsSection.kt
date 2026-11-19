@@ -59,7 +59,7 @@ private const val JPEG_QUALITY = 85
  * Ridimensiona (lato lungo <= MAX_IMAGE_DIM) e ricomprime in JPEG. Riduce i
  * tempi di upload e lo spazio sul server. Ritorna null se il decode fallisce.
  */
-private fun downscaleJpeg(raw: ByteArray): ByteArray? {
+internal fun downscaleJpeg(raw: ByteArray): ByteArray? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
@@ -232,7 +232,7 @@ private fun AttachmentThumb(
     }
 }
 
-private fun createImageFile(context: android.content.Context): File {
+internal fun createImageFile(context: android.content.Context): File {
     val dir = File(context.cacheDir, "images").apply { mkdirs() }
     val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
     return File(dir, "IMG_$stamp.jpg")

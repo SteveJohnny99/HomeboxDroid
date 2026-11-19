@@ -6,6 +6,7 @@ import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Multipart
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Part
@@ -61,6 +62,9 @@ interface HomeboxApi {
 
     @DELETE("v1/entities/{id}")
     suspend fun deleteEntity(@Path("id") id: String)
+
+    @PATCH("v1/entities/{id}")
+    suspend fun patchEntity(@Path("id") id: String, @Body body: EntityPatchDto): EntityOutDto
 
     // Entity types
     @GET("v1/entity-types")

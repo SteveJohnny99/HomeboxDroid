@@ -9,6 +9,10 @@ data class EntityNode(
     val name: String,
     val type: NodeType,
     val children: List<EntityNode>,
+    // Metadati per ordinamento e azioni rapide (null se non disponibili).
+    val quantity: Double? = null,
+    val price: Double? = null,
+    val createdAt: String? = null,
 ) {
     val isLocation: Boolean get() = type == NodeType.LOCATION
     val hasChildren: Boolean get() = children.isNotEmpty()

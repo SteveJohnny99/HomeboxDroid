@@ -307,28 +307,29 @@ private fun CreateLocationDialog(viewModel: HomeViewModel, onClose: () -> Unit) 
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CreateItemDialog(viewModel: HomeViewModel, onClose: () -> Unit) {
     val state by viewModel.state.collectAsState()
     val locations = remember { viewModel.locations }
     val tags by viewModel.tags.collectAsState()
-    var selectedTags by remember { mutableStateOf(emptySet<String>()) }
     LaunchedEffect(Unit) { viewModel.saveSuccess.collect { onClose() } }
 
-    // Precompilazione da barcode (consumata una sola volta all'apertura).
-    val prefill = remember { viewModel.consumeItemPrefill() }
-    var name by remember { mutableStateOf(prefill?.name ?: "") }
-    var quantity by remember { mutableStateOf("1") }
-    var description by remember { mutableStateOf("") }
-    var manufacturer by remember { mutableStateOf(prefill?.manufacturer ?: "") }
-    var model by remember { mutableStateOf(prefill?.modelNumber ?: "") }
-
-    val defaultLoc = state.currentLocationId
-    var selectedLocId by remember { mutableStateOf(defaultLoc ?: locations.firstOrNull()?.id) }
-    var expanded by remember { mutableStateOf(false) }
-
-    val selectedLocName = locations.firstOrNull { it.id == selectedLocId }?.name ?: "Nessuna"
+    // Bozza conservata durante la scansione del barcode + precompilazione.
+    val form = remember {
+        val draft = viewModel.consumeItemDraft() ?: ItemFormState(
+            locationId = state.currentLocationId ?: locations.firstOrNull()?.id,
+        )
+        viewModel.consumeItemPrefill()?.let { p ->
+            // Il barcode riempie solo i campi ancora vuoti.
+            if (draft.name.isBlank() && !p.name.isNullOrBlank()) draft.name = p.name
+            if (draft.manufacturer.isBlank() && !p.manufacturer.isNullOrBlank()) draft.manufacturer = p.manufacturer
+            if (draft.model.isBlank() && !p.modelNumber.isNullOrBlank()) draft.model = p.modelNumber
+            if (draft.notes.isBlank() && !p.notes.isNullOrBlank()) draft.notes = p.notes
+            // Se ha trovato marca o modello, apro le avanzate per mostrarli.
+            if (!p.manufacturer.isNullOrBlank() || !p.modelNumber.isNullOrBlank()) draft.advancedOpen = true
+        }
+        draft
+    }
 
     AlertDialog(
         onDismissRequest = { if (!state.saving) onClose() },
@@ -336,7 +337,7 @@ private fun CreateItemDialog(viewModel: HomeViewModel, onClose: () -> Unit) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedButton(
-                    onClick = { viewModel.startItemBarcodeScan() },
+                    onClick = { viewModel.startItemBarcodeScan(form) },
                     enabled = !state.saving,
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth(),
@@ -345,87 +346,59 @@ private fun CreateItemDialog(viewModel: HomeViewModel, onClose: () -> Unit) {
                     Text("  Scansiona codice a barre")
                 }
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = name, onValueChange = { name = it },
-                    label = { Text("Nome") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = quantity, onValueChange = { quantity = it },
-                    label = { Text("Quantita'") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-
-                if (locations.isNotEmpty()) {
-                    ExposedDropdownMenuBox(
-                        expanded = expanded,
-                        onExpandedChange = { expanded = it },
-                    ) {
-                        OutlinedTextField(
-                            value = selectedLocName,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Posizione") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor(),
-                        )
-                        ExposedDropdownMenu(
-                            expanded = expanded,
-                            onDismissRequest = { expanded = false },
-                        ) {
-                            locations.forEach { loc ->
-                                DropdownMenuItem(
-                                    text = { Text("  ".repeat(loc.depth) + loc.name) },
-                                    onClick = { selectedLocId = loc.id; expanded = false },
-                                )
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                }
-
-                OutlinedTextField(
-                    value = manufacturer, onValueChange = { manufacturer = it },
-                    label = { Text("Produttore (opzionale)") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = model, onValueChange = { model = it },
-                    label = { Text("Modello (opzionale)") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = description, onValueChange = { description = it },
-                    label = { Text("Descrizione (opzionale)") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                TagSelector(
-                    all = tags,
-                    selected = selectedTags,
-                    onToggle = { id ->
-                        selectedTags = if (id in selectedTags) selectedTags - id else selectedTags + id
-                    },
-                    onCreate = { nm -> viewModel.createTag(nm) { t -> selectedTags = selectedTags + t.id } },
+                ItemFormFields(
+                    state = form,
+                    locations = locations,
+                    tags = tags,
+                    onCreateTag = { nm, cb -> viewModel.createTag(nm, cb) },
                 )
             }
         },
         confirmButton = {
             TextButton(
-                onClick = {
-                    val q = quantity.replace(',', '.').toDoubleOrNull() ?: 1.0
-                    viewModel.createItem(name, q, description, manufacturer, model, selectedLocId, selectedTags.toList())
-                    // Chiusura su saveSuccess.
-                },
-                enabled = name.isNotBlank() && !state.saving,
+                onClick = { viewModel.createItem(form.toEdit()) }, // chiusura su saveSuccess
+                enabled = form.name.isNotBlank() && !state.saving,
             ) { Text("Crea") }
+        },
+        dismissButton = {
+            TextButton(onClick = onClose, enabled = !state.saving) { Text("Annulla") }
+        },
+    )
+}
+
+@Composable
+private fun EditEntityDialog(viewModel: HomeViewModel, entity: EntityDetail, onClose: () -> Unit) {
+    // Chiudi SOLO quando il salvataggio va a buon fine: su errore resta aperto.
+    LaunchedEffect(entity.id) { viewModel.saveSuccess.collect { onClose() } }
+    if (entity.isLocation) EditLocationDialog(viewModel, entity, onClose)
+    else EditItemDialog(viewModel, entity, onClose)
+}
+
+@Composable
+private fun EditItemDialog(viewModel: HomeViewModel, entity: EntityDetail, onClose: () -> Unit) {
+    val state by viewModel.state.collectAsState()
+    val locations = remember { viewModel.locations.filter { it.id != entity.id } }
+    val tags by viewModel.tags.collectAsState()
+    val form = remember(entity.id) { ItemFormState.fromDetail(entity) }
+
+    AlertDialog(
+        onDismissRequest = { if (!state.saving) onClose() },
+        title = { Text("Modifica oggetto") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                ItemFormFields(
+                    state = form,
+                    locations = locations,
+                    tags = tags,
+                    onCreateTag = { nm, cb -> viewModel.createTag(nm, cb) },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { viewModel.updateEntity(entity.id, form.toEdit()) },
+                enabled = form.name.isNotBlank() && !state.saving,
+            ) { Text("Salva") }
         },
         dismissButton = {
             TextButton(onClick = onClose, enabled = !state.saving) { Text("Annulla") }
@@ -435,186 +408,77 @@ private fun CreateItemDialog(viewModel: HomeViewModel, onClose: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EditEntityDialog(viewModel: HomeViewModel, entity: EntityDetail, onClose: () -> Unit) {
+private fun EditLocationDialog(viewModel: HomeViewModel, entity: EntityDetail, onClose: () -> Unit) {
     val state by viewModel.state.collectAsState()
-    val locations = remember { viewModel.locations }
-    val isLocation = entity.isLocation
-    val tags by viewModel.tags.collectAsState()
-    var selectedTags by remember(entity.id) { mutableStateOf(entity.tagIds.toSet()) }
-    var customFields by remember(entity.id) { mutableStateOf(entity.customFields) }
-
-    // Chiudi la scheda SOLO quando il salvataggio va a buon fine: su errore
-    // resta aperta con tutte le modifiche.
-    LaunchedEffect(entity.id) { viewModel.saveSuccess.collect { onClose() } }
-
-    var name by remember { mutableStateOf(entity.name) }
-    var description by remember { mutableStateOf(entity.description ?: "") }
-    var quantity by remember { mutableStateOf(entity.quantity?.let { formatQty(it) } ?: "1") }
-    var manufacturer by remember { mutableStateOf(entity.manufacturer ?: "") }
-    var model by remember { mutableStateOf(entity.modelNumber ?: "") }
-    var serial by remember { mutableStateOf(entity.serialNumber ?: "") }
-    var notes by remember { mutableStateOf(entity.notes ?: "") }
-    var price by remember { mutableStateOf(entity.purchasePrice?.let { "%.2f".format(it) } ?: "") }
-    var purchaseDate by remember { mutableStateOf(entity.purchaseDate ?: "") }
-    var purchaseFrom by remember { mutableStateOf(entity.purchaseFrom ?: "") }
-    var warranty by remember { mutableStateOf(entity.warrantyExpires ?: "") }
-    var lifetime by remember { mutableStateOf(entity.lifetimeWarranty) }
-
-    var selectedId by remember { mutableStateOf(if (isLocation) entity.parentId else entity.locationId) }
+    val locations = remember { viewModel.locations.filter { it.id != entity.id } }
+    var name by remember(entity.id) { mutableStateOf(entity.name) }
+    var description by remember(entity.id) { mutableStateOf(entity.description ?: "") }
+    var parentId by remember(entity.id) { mutableStateOf(entity.parentId) }
     var expanded by remember { mutableStateOf(false) }
 
     val options: List<Pair<String?, String>> = buildList {
-        if (isLocation) add(null to "Nessuno (radice)")
-        locations.filter { it.id != entity.id }.forEach { add(it.id to ("  ".repeat(it.depth) + it.name)) }
+        add(null to "Nessuno (radice)")
+        locations.forEach { add(it.id to ("  ".repeat(it.depth) + it.name)) }
     }
-    val selectedLabel = options.firstOrNull { it.first == selectedId }?.second
-        ?: if (isLocation) "Nessuno (radice)" else "Nessuna"
+    val selectedLabel = options.firstOrNull { it.first == parentId }?.second ?: "Nessuno (radice)"
 
     AlertDialog(
         onDismissRequest = { if (!state.saving) onClose() },
-        title = { Text(if (isLocation) "Modifica luogo" else "Modifica oggetto") },
+        title = { Text("Modifica luogo") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = name, onValueChange = { name = it },
-                    label = { Text("Nome") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Nome") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
-
-                if (!isLocation) {
-                    OutlinedTextField(
-                        value = quantity, onValueChange = { quantity = it },
-                        label = { Text("Quantita'") }, singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
-
-                if (options.isNotEmpty()) {
-                    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
-                        OutlinedTextField(
-                            value = selectedLabel, onValueChange = {}, readOnly = true,
-                            label = { Text(if (isLocation) "Luogo superiore" else "Posizione") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                            modifier = Modifier.fillMaxWidth().menuAnchor(),
-                        )
-                        ExposedDropdownMenu(
-                            expanded = expanded, onDismissRequest = { expanded = false },
-                        ) {
-                            options.forEach { (id, label) ->
-                                DropdownMenuItem(
-                                    text = { Text(label) },
-                                    onClick = { selectedId = id; expanded = false },
-                                )
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                }
-
-                if (!isLocation) {
-                    OutlinedTextField(
-                        value = manufacturer, onValueChange = { manufacturer = it },
-                        label = { Text("Produttore") }, singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = model, onValueChange = { model = it },
-                        label = { Text("Modello") }, singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = serial, onValueChange = { serial = it },
-                        label = { Text("Numero seriale") }, singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = price, onValueChange = { price = it },
-                        label = { Text("Prezzo d'acquisto") }, singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    DateField(
-                        label = "Data acquisto",
-                        isoValue = purchaseDate,
-                        onChange = { purchaseDate = it ?: "" },
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = purchaseFrom, onValueChange = { purchaseFrom = it },
-                        label = { Text("Acquistato da") }, singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Garanzia a vita", modifier = Modifier.weight(1f))
-                        Switch(checked = lifetime, onCheckedChange = { lifetime = it })
-                    }
-                    if (!lifetime) {
-                        DateField(
-                            label = "Scadenza garanzia",
-                            isoValue = warranty,
-                            onChange = { warranty = it ?: "" },
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = notes, onValueChange = { notes = it },
-                        label = { Text("Note") },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    TagSelector(
-                        all = tags,
-                        selected = selectedTags,
-                        onToggle = { id ->
-                            selectedTags = if (id in selectedTags) selectedTags - id else selectedTags + id
-                        },
-                        onCreate = { nm -> viewModel.createTag(nm) { t -> selectedTags = selectedTags + t.id } },
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    CustomFieldsEditor(fields = customFields, onChange = { customFields = it })
-                    Spacer(Modifier.height(8.dp))
-                }
-
                 OutlinedTextField(
                     value = description, onValueChange = { description = it },
-                    label = { Text("Descrizione") },
-                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Descrizione") }, modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
+                ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+                    OutlinedTextField(
+                        value = selectedLabel, onValueChange = {}, readOnly = true,
+                        label = { Text("Luogo superiore") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                    )
+                    ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        options.forEach { (id, label) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = { parentId = id; expanded = false },
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    val q = quantity.replace(',', '.').toDoubleOrNull()
-                    val p = price.replace(',', '.').toDoubleOrNull()
-                    val edit = HomeboxRepository.EntityEdit(
-                        name = name,
-                        description = description,
-                        notes = if (isLocation) null else notes,
-                        quantity = if (isLocation) null else q,
-                        manufacturer = if (isLocation) null else manufacturer,
-                        modelNumber = if (isLocation) null else model,
-                        serialNumber = if (isLocation) null else serial,
-                        purchasePrice = if (isLocation) null else p,
-                        purchaseDate = if (isLocation) null else purchaseDate,
-                        purchaseFrom = if (isLocation) null else purchaseFrom,
-                        warrantyExpires = if (isLocation) null else warranty,
-                        lifetimeWarranty = if (isLocation) false else lifetime,
-                        locationId = if (isLocation) null else selectedId,
-                        parentId = selectedId,
-                        tagIds = if (isLocation) emptyList() else selectedTags.toList(),
-                        customFields = if (isLocation) null else customFields,
+                    viewModel.updateEntity(
+                        entity.id,
+                        HomeboxRepository.EntityEdit(
+                            name = name,
+                            description = description,
+                            notes = entity.notes,
+                            quantity = null,
+                            manufacturer = null,
+                            modelNumber = null,
+                            serialNumber = null,
+                            purchasePrice = null,
+                            purchaseDate = null,
+                            purchaseFrom = null,
+                            warrantyExpires = null,
+                            lifetimeWarranty = false,
+                            locationId = null,
+                            parentId = parentId,
+                            tagIds = entity.tagIds, // preserva i tag del luogo
+                            customFields = null,
+                        ),
                     )
-                    viewModel.updateEntity(entity.id, edit)
-                    // La chiusura avviene su saveSuccess: su errore la scheda resta.
                 },
                 enabled = name.isNotBlank() && !state.saving,
             ) { Text("Salva") }

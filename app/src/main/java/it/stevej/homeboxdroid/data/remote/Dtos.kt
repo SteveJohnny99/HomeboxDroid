@@ -75,6 +75,15 @@ data class EntitySummaryDto(
     val thumbnailId: String? = null,
     val entityType: EntityTypeSummaryDto? = null,
     val tags: List<TagSummaryDto>? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+/** PATCH parziale: il backend modifica solo i campi presenti. */
+@Serializable
+data class EntityPatchDto(
+    val id: String,
+    val quantity: Double? = null,
 )
 
 @Serializable

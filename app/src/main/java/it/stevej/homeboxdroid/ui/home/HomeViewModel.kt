@@ -29,9 +29,47 @@ data class Crumb(val id: String, val name: String)
 internal fun findChild(nodes: List<EntityNode>, id: String): EntityNode? =
     nodes.firstOrNull { it.id == id }
 
+/** Criteri di ordinamento della lista. */
+enum class SortField(val label: String) {
+    NAME("Nome"), CREATED("Data creazione"), QUANTITY("Quantita'"), PRICE("Prezzo")
+}
+
+data class SortOptions(
+    val field: SortField = SortField.NAME,
+    val asc: Boolean = true,
+    val locationsFirst: Boolean = true,
+)
+
+/** Confronto con i valori mancanti sempre in fondo, a prescindere dalla direzione. */
+private fun <T : Comparable<T>> cmpNullsLast(a: T?, b: T?, asc: Boolean): Int = when {
+    a == null && b == null -> 0
+    a == null -> 1
+    b == null -> -1
+    asc -> a.compareTo(b)
+    else -> b.compareTo(a)
+}
+
+internal fun sortNodes(nodes: List<EntityNode>, s: SortOptions): List<EntityNode> {
+    val byName = Comparator<EntityNode> { a, b -> a.name.lowercase().compareTo(b.name.lowercase()) }
+    val main = Comparator<EntityNode> { a, b ->
+        val r = when (s.field) {
+            SortField.NAME -> if (s.asc) byName.compare(a, b) else byName.compare(b, a)
+            SortField.CREATED -> cmpNullsLast(a.createdAt, b.createdAt, s.asc)
+            SortField.QUANTITY -> cmpNullsLast(a.quantity, b.quantity, s.asc)
+            SortField.PRICE -> cmpNullsLast(a.price, b.price, s.asc)
+        }
+        if (r != 0) r else byName.compare(a, b)
+    }
+    val cmp = if (s.locationsFirst) {
+        compareByDescending<EntityNode> { it.type == NodeType.LOCATION }.then(main)
+    } else main
+    return nodes.sortedWith(cmp)
+}
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val repo: HomeboxRepository,
+    private val settings: it.stevej.homeboxdroid.data.SecureSettings,
 ) : ViewModel() {
 
     data class UiState(
@@ -42,6 +80,7 @@ class HomeViewModel @Inject constructor(
         val stats: Statistics? = null,
         val message: String? = null,
         val saving: Boolean = false,
+        val sort: SortOptions = SortOptions(),
     ) {
         /** Nodi da mostrare al livello corrente del breadcrumb. */
         val currentChildren: List<EntityNode>
@@ -51,10 +90,7 @@ class HomeViewModel @Inject constructor(
                     val next = findChild(level, crumb.id) ?: return emptyList()
                     level = next.children
                 }
-                return level.sortedWith(
-                    compareByDescending<EntityNode> { it.type == NodeType.LOCATION }
-                        .thenBy { it.name.lowercase() }
-                )
+                return sortNodes(level, sort)
             }
 
         /** Location corrente (ultimo crumb non radice), per default nelle creazioni. */
@@ -62,8 +98,43 @@ class HomeViewModel @Inject constructor(
             get() = crumbs.lastOrNull()?.id?.ifBlank { null }
     }
 
-    private val _state = MutableStateFlow(UiState())
+    private val _state = MutableStateFlow(
+        UiState(
+            sort = SortOptions(
+                field = runCatching { SortField.valueOf(settings.sortField) }.getOrDefault(SortField.NAME),
+                asc = settings.sortAsc,
+                locationsFirst = settings.sortLocationsFirst,
+            )
+        )
+    )
     val state: StateFlow<UiState> = _state.asStateFlow()
+
+    fun setSort(field: SortField) {
+        _state.update {
+            // Ri-selezionare lo stesso criterio inverte la direzione; un criterio
+            // nuovo parte da una direzione sensata (date: piu' recenti prima).
+            val asc = if (it.sort.field == field) !it.sort.asc else field == SortField.NAME
+            it.copy(sort = it.sort.copy(field = field, asc = asc))
+        }
+        persistSort()
+    }
+
+    fun setSortAsc(asc: Boolean) {
+        _state.update { it.copy(sort = it.sort.copy(asc = asc)) }
+        persistSort()
+    }
+
+    fun setLocationsFirst(v: Boolean) {
+        _state.update { it.copy(sort = it.sort.copy(locationsFirst = v)) }
+        persistSort()
+    }
+
+    private fun persistSort() {
+        val s = _state.value.sort
+        settings.sortField = s.field.name
+        settings.sortAsc = s.asc
+        settings.sortLocationsFirst = s.locationsFirst
+    }
 
     private val _detail = MutableStateFlow<DetailState>(DetailState.Hidden)
     val detail: StateFlow<DetailState> = _detail.asStateFlow()
@@ -92,6 +163,9 @@ class HomeViewModel @Inject constructor(
         is HomeboxRepository.WriteResult.Queued -> {
             _state.update { it.copy(saving = false, message = "$doneMsg (in coda, offline)") }; true
         }
+        is HomeboxRepository.WriteResult.Partial -> {
+            _state.update { it.copy(saving = false, message = r.message) }; true
+        }
         is HomeboxRepository.WriteResult.Error -> {
             _state.update { it.copy(saving = false, message = r.message) }; false
         }
@@ -110,10 +184,15 @@ class HomeViewModel @Inject constructor(
     fun consumeItemPrefill(): it.stevej.homeboxdroid.domain.BarcodeResult? =
         pendingPrefill.also { pendingPrefill = null }
 
-    fun openCreateItem() { pendingPrefill = null; _showCreateItem.value = true }
+    // Bozza del modulo conservata mentre il dialog e' chiuso per la scansione.
+    @Volatile private var itemDraft: ItemFormState? = null
+    fun consumeItemDraft(): ItemFormState? = itemDraft.also { itemDraft = null }
+
+    fun openCreateItem() { pendingPrefill = null; itemDraft = null; _showCreateItem.value = true }
     fun closeCreateItem() { _showCreateItem.value = false }
 
-    fun startItemBarcodeScan() {
+    fun startItemBarcodeScan(draft: ItemFormState? = null) {
+        itemDraft = draft
         _showCreateItem.value = false
         _scannerForItem.value = true
     }
@@ -292,26 +371,22 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun createItem(
-        name: String,
-        quantity: Double,
-        description: String?,
-        manufacturer: String?,
-        modelNumber: String?,
-        locationId: String?,
-        tagIds: List<String> = emptyList(),
-    ) {
-        if (name.isBlank()) return
+    fun createItem(edit: HomeboxRepository.EntityEdit) {
+        if (edit.name.isBlank()) return
         _state.update { it.copy(saving = true) }
         viewModelScope.launch {
-            if (handleWrite(
-                    repo.createItem(name, quantity, description, manufacturer, modelNumber, locationId, tagIds),
-                    "Oggetto creato.",
-                )
-            ) {
+            if (handleWrite(repo.createItem(edit), "Oggetto creato.")) {
                 _saveSuccess.tryEmit(Unit)
                 refresh()
             }
+        }
+    }
+
+    /** Azione rapida dalla lista: imposta la quantita' (PATCH). */
+    fun setQuantity(id: String, quantity: Double) {
+        _state.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            if (handleWrite(repo.patchQuantity(id, quantity), "Quantita' aggiornata.")) refresh()
         }
     }
 
@@ -342,12 +417,17 @@ class HomeViewModel @Inject constructor(
     fun attachmentUrl(entityId: String, attachmentId: String): String =
         repo.attachmentUrl(entityId, attachmentId)
 
-    fun uploadAttachment(entityId: String, bytes: ByteArray, filename: String, mime: String) {
+    /** openAfter=false per la foto rapida dalla lista (non apre il dettaglio). */
+    fun uploadAttachment(
+        entityId: String, bytes: ByteArray, filename: String, mime: String, openAfter: Boolean = true,
+    ) {
         _state.update { it.copy(saving = true) }
         viewModelScope.launch {
-            if (handleWrite(repo.uploadAttachment(entityId, bytes, filename, mime, primary = false), "Allegato caricato.")) {
-                openDetail(entityId) // ricarica il dettaglio con il nuovo allegato
-            }
+            val ok = handleWrite(
+                repo.uploadAttachment(entityId, bytes, filename, mime, primary = false),
+                if (openAfter) "Allegato caricato." else "Foto caricata.",
+            )
+            if (ok && openAfter) openDetail(entityId) // ricarica il dettaglio con il nuovo allegato
         }
     }
 

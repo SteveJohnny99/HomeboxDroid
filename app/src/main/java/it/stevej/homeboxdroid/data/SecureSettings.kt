@@ -56,6 +56,19 @@ class SecureSettings @Inject constructor(
         get() = prefs.getString(KEY_USER_EMAIL, null)
         set(value) = prefs.edit().putStringOrRemove(KEY_USER_EMAIL, value).apply()
 
+    // Ordinamento lista (preferenza dell'utente, sopravvive ai riavvii).
+    var sortField: String
+        get() = prefs.getString(KEY_SORT_FIELD, "NAME") ?: "NAME"
+        set(value) = prefs.edit().putString(KEY_SORT_FIELD, value).apply()
+
+    var sortAsc: Boolean
+        get() = prefs.getBoolean(KEY_SORT_ASC, true)
+        set(value) = prefs.edit().putBoolean(KEY_SORT_ASC, value).apply()
+
+    var sortLocationsFirst: Boolean
+        get() = prefs.getBoolean(KEY_SORT_LOC_FIRST, true)
+        set(value) = prefs.edit().putBoolean(KEY_SORT_LOC_FIRST, value).apply()
+
     fun isConfigured(): Boolean = !serverUrl.isNullOrBlank() && !credential.isNullOrBlank()
 
     fun clearSession() {
@@ -82,6 +95,9 @@ class SecureSettings @Inject constructor(
         private const val KEY_SELF_SIGNED = "allow_self_signed"
         private const val KEY_USER_NAME = "user_name"
         private const val KEY_USER_EMAIL = "user_email"
+        private const val KEY_SORT_FIELD = "sort_field"
+        private const val KEY_SORT_ASC = "sort_asc"
+        private const val KEY_SORT_LOC_FIRST = "sort_loc_first"
         const val MODE_APIKEY = "apikey"
         const val MODE_PASSWORD = "password"
 

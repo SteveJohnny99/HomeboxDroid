@@ -12,7 +12,7 @@ import androidx.room.RoomDatabase
         StatsEntity::class,
         PendingOpEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class HomeboxDatabase : RoomDatabase() {

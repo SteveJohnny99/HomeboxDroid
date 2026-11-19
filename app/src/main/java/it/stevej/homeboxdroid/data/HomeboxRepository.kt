@@ -7,6 +7,7 @@ import it.stevej.homeboxdroid.data.remote.EntityUpdateDto
 import it.stevej.homeboxdroid.data.remote.HomeboxApi
 import it.stevej.homeboxdroid.data.remote.LoginFormDto
 import it.stevej.homeboxdroid.data.remote.EntityFieldDataDto
+import it.stevej.homeboxdroid.data.remote.EntityPatchDto
 import it.stevej.homeboxdroid.data.remote.MaintenanceEntryCreateDto
 import it.stevej.homeboxdroid.data.remote.TagCreateDto
 import it.stevej.homeboxdroid.data.remote.TreeItemDto
@@ -74,6 +75,8 @@ class HomeboxRepository @Inject constructor(
     sealed interface WriteResult {
         data object Done : WriteResult
         data object Queued : WriteResult
+        /** Operazione principale riuscita, ma una parte secondaria no (messaggio). */
+        data class Partial(val message: String) : WriteResult
         data class Error(val message: String) : WriteResult
     }
 
@@ -187,9 +190,22 @@ class HomeboxRepository @Inject constructor(
         withContext(Dispatchers.IO) {
             when (val r = safeApiCall { api.tree(withItems) }) {
                 is ApiResult.Success -> {
-                    cache.replaceNodes(flattenForCache(r.data))
+                    // L'albero non contiene quantita'/prezzo/data: li prendo da
+                    // /entities (paginato). Se manca qualcosa uso i valori in cache.
+                    val prev = cache.allNodes().associateBy { it.id }
+                    val meta = fetchMeta()
+                    val rows = flattenForCache(r.data).map { row ->
+                        val m = meta[row.id]
+                        val p = prev[row.id]
+                        row.copy(
+                            quantity = m?.quantity ?: p?.quantity,
+                            price = m?.price ?: p?.price,
+                            createdAt = m?.createdAt ?: p?.createdAt,
+                        )
+                    }
+                    cache.replaceNodes(rows)
                     _offline.value = false
-                    ApiResult.Success(r.data.map { it.toNode() })
+                    ApiResult.Success(rebuildTree(rows))
                 }
                 is ApiResult.Error -> {
                     if (isConnectivity(r)) {
@@ -203,6 +219,27 @@ class HomeboxRepository @Inject constructor(
                 }
             }
         }
+
+    private data class NodeMeta(val quantity: Double?, val price: Double?, val createdAt: String?)
+
+    /** Metadati di tutte le entita' (paginato), per ordinamento e azioni rapide. */
+    private suspend fun fetchMeta(): Map<String, NodeMeta> {
+        val out = HashMap<String, NodeMeta>()
+        var page = 1
+        while (page <= 40) {
+            val r = safeApiCall { api.entities(page = page, pageSize = 500) }
+            if (r !is ApiResult.Success) break
+            val items = r.data.items.orEmpty()
+            items.forEach { s ->
+                val sid = s.id ?: return@forEach
+                out[sid] = NodeMeta(s.quantity, s.purchasePrice, s.createdAt)
+            }
+            val total = r.data.total ?: 0
+            if (items.isEmpty() || out.size >= total) break
+            page++
+        }
+        return out
+    }
 
     suspend fun entity(id: String): ApiResult<EntityDetail> = withContext(Dispatchers.IO) {
         when (val r = safeApiCall { api.entity(id) }) {
@@ -389,41 +426,61 @@ class HomeboxRepository @Inject constructor(
             WriteResult.Queued
         }
 
-    suspend fun createItem(
-        name: String,
-        quantity: Double,
-        description: String?,
-        manufacturer: String?,
-        modelNumber: String?,
-        locationId: String?,
-        tagIds: List<String> = emptyList(),
-    ): WriteResult = withContext(Dispatchers.IO) {
+    /**
+     * Il POST di creazione accetta solo nome/descrizione/quantita'/produttore/
+     * modello/posizione/tag. Gli altri campi (seriale, acquisto, garanzia, note,
+     * campi personalizzati) vengono salvati subito dopo con un PUT sull'id creato.
+     */
+    private fun EntityEdit.needsFollowUp(): Boolean =
+        !serialNumber.isNullOrBlank() || purchasePrice != null || !purchaseDate.isNullOrBlank() ||
+            !purchaseFrom.isNullOrBlank() || !warrantyExpires.isNullOrBlank() || lifetimeWarranty ||
+            !notes.isNullOrBlank() || !customFields.isNullOrEmpty()
+
+    suspend fun createItem(edit: EntityEdit): WriteResult = withContext(Dispatchers.IO) {
+        val quantity = edit.quantity ?: 1.0
+        val locationId = edit.locationId
         val typeRes = resolveTypeId(location = false)
         if (typeRes is ApiResult.Error && !isConnectivity(typeRes)) {
             return@withContext WriteResult.Error(typeRes.message)
         }
         if (typeRes is ApiResult.Success) {
             val body = EntityCreateDto(
-                name = name.trim(),
-                description = description?.trim()?.ifBlank { null },
+                name = edit.name.trim(),
+                description = edit.description?.trim()?.ifBlank { null },
                 entityTypeId = typeRes.data,
                 quantity = quantity,
-                manufacturer = manufacturer?.trim()?.ifBlank { null },
-                modelNumber = modelNumber?.trim()?.ifBlank { null },
+                manufacturer = edit.manufacturer?.trim()?.ifBlank { null },
+                modelNumber = edit.modelNumber?.trim()?.ifBlank { null },
                 locationId = locationId,
                 parentId = locationId,
-                tagIds = tagIds.ifEmpty { null },
+                tagIds = edit.tagIds.ifEmpty { null },
             )
             when (val r = netCreateEntity(body)) {
-                is ApiResult.Success -> { _offline.value = false; return@withContext WriteResult.Done }
+                is ApiResult.Success -> {
+                    _offline.value = false
+                    val newId = r.data
+                    if (!edit.needsFollowUp() || newId.isBlank()) return@withContext WriteResult.Done
+                    val full = edit.copy(quantity = quantity, parentId = locationId)
+                    return@withContext when (val u = netUpdate(newId, full)) {
+                        is ApiResult.Success -> WriteResult.Done
+                        is ApiResult.Error -> if (isConnectivity(u)) {
+                            // Creato, ma la rete e' caduta: i dettagli vanno in coda.
+                            enqueueUpdate(newId, full)
+                            WriteResult.Queued
+                        } else {
+                            WriteResult.Partial("Oggetto creato, ma i campi avanzati non sono stati salvati: ${u.message}")
+                        }
+                    }
+                }
                 is ApiResult.Error -> if (!isConnectivity(r)) return@withContext WriteResult.Error(r.message)
             }
         }
+        // Offline: create in coda + (se servono) dettagli in coda sul temp-id.
         val tempId = newTempId()
         val payload = CreateItemPayload(
-            tempId, name.trim(), quantity, description?.trim()?.ifBlank { null },
-            manufacturer?.trim()?.ifBlank { null }, modelNumber?.trim()?.ifBlank { null },
-            locationId, tagIds,
+            tempId, edit.name.trim(), quantity, edit.description?.trim()?.ifBlank { null },
+            edit.manufacturer?.trim()?.ifBlank { null }, edit.modelNumber?.trim()?.ifBlank { null },
+            locationId, edit.tagIds,
         )
         cache.insertPending(
             PendingOpEntity(
@@ -432,16 +489,51 @@ class HomeboxRepository @Inject constructor(
                 tempId = tempId, createdAt = System.currentTimeMillis(), lastError = null,
             )
         )
-        optimisticCreateNode(tempId, name.trim(), isLocation = false, parentId = locationId, quantity = quantity)
+        optimisticCreateNode(tempId, edit.name.trim(), isLocation = false, parentId = locationId, quantity = quantity)
+        if (edit.needsFollowUp()) {
+            val full = edit.copy(quantity = quantity, parentId = locationId)
+            enqueueUpdate(tempId, full)
+            patchCachedDetail(tempId, full)
+        }
         WriteResult.Queued
     }
 
-    suspend fun updateEntity(id: String, edit: EntityEdit): WriteResult = withContext(Dispatchers.IO) {
-        when (val r = netUpdate(id, edit)) {
-            is ApiResult.Success -> { _offline.value = false; return@withContext WriteResult.Done }
-            is ApiResult.Error -> if (!isConnectivity(r)) return@withContext WriteResult.Error(r.message)
+    /** Variazione rapida della quantita' (PATCH: tocca solo la quantita'). */
+    suspend fun patchQuantity(id: String, quantity: Double): WriteResult = withContext(Dispatchers.IO) {
+        if (!id.startsWith("tmp_")) {
+            when (val r = netPatchQuantity(id, quantity)) {
+                is ApiResult.Success -> {
+                    _offline.value = false
+                    cache.updateNodeQuantity(id, quantity)
+                    return@withContext WriteResult.Done
+                }
+                is ApiResult.Error -> if (!isConnectivity(r)) return@withContext WriteResult.Error(r.message)
+            }
         }
-        // Offline: coda + patch ottimistica.
+        cache.insertPending(
+            PendingOpEntity(
+                type = PendingType.PATCH_QTY,
+                payload = json.encodeToString(PatchQtyPayload.serializer(), PatchQtyPayload(id, quantity)),
+                tempId = null, createdAt = System.currentTimeMillis(), lastError = null,
+            )
+        )
+        cache.updateNodeQuantity(id, quantity)
+        cache.detailJson(id)?.let { j ->
+            runCatching {
+                val dto = json.decodeFromString(EntityOutDto.serializer(), j)
+                cache.putDetail(DetailEntity(id, json.encodeToString(EntityOutDto.serializer(), dto.copy(quantity = quantity))))
+            }
+        }
+        WriteResult.Queued
+    }
+
+    private suspend fun netPatchQuantity(id: String, quantity: Double): ApiResult<Unit> =
+        when (val r = safeApiCall { api.patchEntity(id, EntityPatchDto(id = id, quantity = quantity)) }) {
+            is ApiResult.Error -> ApiResult.Error(r.message, r.code)
+            is ApiResult.Success -> ApiResult.Success(Unit)
+        }
+
+    private suspend fun enqueueUpdate(id: String, edit: EntityEdit) {
         val payload = UpdatePayload(
             id, edit.name.trim(), edit.description, edit.notes, edit.quantity, edit.manufacturer,
             edit.modelNumber, edit.serialNumber, edit.purchasePrice, edit.purchaseDate, edit.purchaseFrom,
@@ -457,6 +549,15 @@ class HomeboxRepository @Inject constructor(
                 tempId = null, createdAt = System.currentTimeMillis(), lastError = null,
             )
         )
+    }
+
+    suspend fun updateEntity(id: String, edit: EntityEdit): WriteResult = withContext(Dispatchers.IO) {
+        when (val r = netUpdate(id, edit)) {
+            is ApiResult.Success -> { _offline.value = false; return@withContext WriteResult.Done }
+            is ApiResult.Error -> if (!isConnectivity(r)) return@withContext WriteResult.Error(r.message)
+        }
+        // Offline: coda + patch ottimistica.
+        enqueueUpdate(id, edit)
         cache.renameNode(id, edit.name.trim())
         patchCachedDetail(id, edit)
         WriteResult.Queued
@@ -556,6 +657,8 @@ class HomeboxRepository @Inject constructor(
                 id = tempId, name = name,
                 type = (if (isLocation) NodeType.LOCATION else NodeType.ITEM).name,
                 parentId = parentId, position = pos,
+                quantity = quantity,
+                createdAt = java.time.Instant.now().toString(),
             )
         )
         val dto = EntityOutDto(id = tempId, name = name, quantity = quantity, locationId = parentId)
@@ -645,6 +748,10 @@ class HomeboxRepository @Inject constructor(
                 PendingType.DELETE -> {
                     val p = json.decodeFromString(DeletePayload.serializer(), op.payload)
                     netDelete(p.targetId)
+                }
+                PendingType.PATCH_QTY -> {
+                    val p = json.decodeFromString(PatchQtyPayload.serializer(), op.payload)
+                    netPatchQuantity(p.targetId, p.quantity)
                 }
                 PendingType.UPLOAD -> {
                     val p = json.decodeFromString(UploadPayload.serializer(), op.payload)
@@ -909,19 +1016,15 @@ class HomeboxRepository @Inject constructor(
                     name = n.name,
                     type = runCatching { NodeType.valueOf(n.type) }.getOrDefault(NodeType.OTHER),
                     children = build(n.id),
+                    quantity = n.quantity,
+                    price = n.price,
+                    createdAt = n.createdAt,
                 )
             }
         return build(null)
     }
 
     // --- Mapping ------------------------------------------------------------
-
-    private fun TreeItemDto.toNode(): EntityNode = EntityNode(
-        id = id.orEmpty(),
-        name = name ?: "(senza nome)",
-        type = nodeTypeOf(this),
-        children = children?.map { it.toNode() } ?: emptyList(),
-    )
 
     private fun EntityTypeSummaryDto.toType(): EntityType = EntityType(
         id = id.orEmpty(),

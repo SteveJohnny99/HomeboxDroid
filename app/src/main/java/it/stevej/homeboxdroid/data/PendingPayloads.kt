@@ -10,7 +10,11 @@ object PendingType {
     const val UPDATE = "update"
     const val DELETE = "delete"
     const val UPLOAD = "upload"
+    const val PATCH_QTY = "patch_qty"
 }
+
+@Serializable
+data class PatchQtyPayload(val targetId: String, val quantity: Double)
 
 @Serializable
 data class CreateLocationPayload(
